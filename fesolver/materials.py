@@ -8,7 +8,7 @@ class plane_stress_constitutive_material_matrix :
         else : 
             self.E = E
         
-        if nu > 0.5 or nu < -1 : 
+        if nu >= 0.5 or nu <= -1 : 
             raise ValueError("Poisson's ratio must lie bwteen -1.0 and 0.5 ")
         else : 
             self.nu = nu
@@ -21,5 +21,6 @@ class plane_stress_constitutive_material_matrix :
         
         return D
         
-        
+mat = plane_stress_constitutive_material_matrix(2009, 0.5)
+mat.D
         
