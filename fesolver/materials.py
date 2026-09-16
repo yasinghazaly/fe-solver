@@ -2,8 +2,17 @@ import numpy as np
 
 class plane_stress_constitutive_material_matrix : 
     def __init__(self,E,nu) :
-        self.E = E
-        self.nu = nu
+        
+        if E <= 0 : 
+            raise ValueError("young's Modulus must be a positive integer.")
+        else : 
+            self.E = E
+        
+        if nu > 0.5 or nu < -1 : 
+            raise ValueError("Poisson's ratio must lie bwteen -1.0 and 0.5 ")
+        else : 
+            self.nu = nu
+            
         self.construct_matrix()
 
     def construct_matrix (self,) : 
