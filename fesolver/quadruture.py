@@ -7,8 +7,6 @@ def gauss_1d(n:int) :
 def gauss_2d(n:int) : 
     x , w = np.polynomial.legendre.leggauss(n)
     points = np.array(np.meshgrid(x,x,indexing='ij')).reshape(2,-1).T
-
-    print(points)
+    weights = (w*w[:,None]).ravel()
     
-    
-gauss_2d(2)
+    return points, weights
