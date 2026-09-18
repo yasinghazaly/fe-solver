@@ -53,6 +53,22 @@ class CST(Base) :
         K = B.T @ material.D @ B * thickness/2 * det_jacobian
         return K 
     
+    def gauss_point_stresses(self, coords, material, u_e):
+        """
+        Strain and stress for the element.
+
+        u_e is the element displacement vector, shape (6,), in DOF order
+        [u1, v1, u2, v2, u3, v3].
+
+        Returns strain and stress, each (1, 3) in Voigt ordering. Strain is
+        constant over the element, so a single row is returned rather than
+        one per quadrature point.
+        """
+        B = self.B_matrix(0,0,coords)
+        strain = B @ u_e.flatten()
+        stress = strain @ material.D.T
+        return strain,stress
+
         
         
     
