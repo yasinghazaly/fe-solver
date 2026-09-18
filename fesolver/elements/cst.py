@@ -66,7 +66,7 @@ class CST(Base) :
         """
         B = self.B_matrix(0,0,coords)
         strain = B @ u_e.flatten()
-        stress = strain @ material.D.T
+        stress = strain.T @ material.D.T
         return strain,stress
 
         
