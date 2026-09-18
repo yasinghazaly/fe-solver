@@ -87,10 +87,18 @@ class Base(ABC) :
                 K += B.T @  D @ B *det_jacobian *weights[k] * thickness
                     
         return K
-        
-        
-        
+    
+    def gauss_point_stresses(self,coords,material,u_e) : 
+        points, weights = gauss_2d(self.n_gauss)
+        strain = np.zeros((len(points),3))
+        for k , (xi,eta) in enumerate(points) : 
+            B = self.B_matrix(xi,eta,coords)
+            strain[k] = B @ u_e.flatten()
+        stress = strain @ material.D.T
+        return strain , stress
             
+
+
     
         
         
