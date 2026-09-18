@@ -89,6 +89,15 @@ class Base(ABC) :
         return K
     
     def gauss_point_stresses(self,coords,material,u_e) : 
+        """
+        Strain and stress at each Gauss point.
+
+        u_e is the element displacement vector, shape (2 * n_nodes,), in DOF
+        order [u1, v1, u2, v2, ...].
+
+        Returns strain and stress, each (n_gauss**2, 3) in Voigt ordering,
+        in the same point order as quadrature.gauss_2d.
+        """
         points, weights = gauss_2d(self.n_gauss)
         strain = np.zeros((len(points),3))
         for k , (xi,eta) in enumerate(points) : 
