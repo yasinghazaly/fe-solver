@@ -1,0 +1,13 @@
+[project]
+name = "fesolver"
+version = "0.1.0"
+description = "2D plane-stress finite element solver built around the 8-node serendipity element"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fesolver*"]
