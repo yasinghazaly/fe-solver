@@ -1,6 +1,6 @@
 import numpy as np 
 
-class Mesh() : 
+class Mesh : 
     """
     Nodes and element connectivity for a 2D mesh.
 
