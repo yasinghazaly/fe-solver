@@ -4,3 +4,4 @@ __pycache__/
 .vscode/
 .ipynb_checkpoints/
 scratch*.py
+*.egg-info/
