@@ -1,5 +1,6 @@
 import numpy as np
 from fesolver.elements.base import Base
+from fesolver.quadrature import gauss_2d
 
 class Quad8(Base) : 
     
@@ -15,6 +16,7 @@ class Quad8(Base) :
     
     n_nodes = 8 
     n_gauss = 3
+    n_gauss_points = 9 
     
     def shape_functions(self,xi,eta) : 
         """Shape function values, shape (8,)."""
@@ -50,4 +52,3 @@ class Quad8(Base) :
                                       [dN7_dxi,dN7_deta],
                                       [dN8_dxi,dN8_deta]])
         return shape_derivatives
-        

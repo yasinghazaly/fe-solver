@@ -33,11 +33,11 @@ def assembly_stiffness(mesh,element_cls,material,thickness) :
         corresponding to two translations and one rotation.
     """
     K = np.zeros((mesh.n_dofs,mesh.n_dofs))
-    for row in range(mesh.n_elements) : 
-        coords = mesh.element_coords(row)
+    for e in range(mesh.n_elements) : 
+        coords = mesh.element_coords(e)
         element = element_cls()
         k_e = element.stiffness(coords,material,thickness)
-        dofs = mesh.element_dofs(row)
+        dofs = mesh.element_dofs(e)
         K[np.ix_(dofs,dofs)] += k_e
     return K 
 

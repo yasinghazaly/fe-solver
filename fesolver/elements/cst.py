@@ -15,7 +15,8 @@ class CST(Base) :
     in closed form rather than by quadrature.
     """
     n_nodes = 3
-    n_gauss = 3
+    n_gauss = 1
+    n_gauss_points = 1
     
     def shape_functions(self,xi,eta) : 
         """Shape function values at (xi, eta), shape (3,)."""
@@ -39,6 +40,20 @@ class CST(Base) :
                                       [dN2_dxi,dN2_deta], 
                                       [dN3_dxi,dN3_deta]]) 
         return shape_derivatives
+    
+    def extrapolation_matrix(self) : 
+        """Extrapolation operator, trivial for a constant-strain element.
+
+        Stress is constant over a CST, so the single Gauss-point value applies
+        unchanged at all three nodes. The general least-squares construction in
+        the base class is singular here -- one known value cannot determine three
+        independent nodal values -- so it is overridden with the known answer.
+
+        Returns
+        -------
+        ndarray, shape (3, 1)
+        """
+        return np.ones((3,1))
     
     def stiffness(self, coords, material, thickness):
         """

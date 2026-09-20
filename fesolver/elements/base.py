@@ -27,6 +27,28 @@ class Base(ABC) :
         """Natural derivatives at (xi, eta), shape (n_nodes, 2)."""
         ...
         
+    def extrapolation_matrix(self) : 
+        """Least-squares operator mapping Gauss-point values to nodal values.
+
+        E holds the shape functions evaluated at each Gauss point, so E @ nodal
+        interpolates nodal values to the Gauss points. Recovering nodal values
+        from Gauss values is the reverse, and is overdetermined for an element
+        with more Gauss points than nodes, so the pseudoinverse gives the best
+        fit in a least-squares sense.
+
+        Every row sums to one, so a constant stress field is reproduced exactly.
+
+        Returns
+        -------
+        ndarray, shape (n_nodes, n_gauss_points)
+        """
+        points , _ = gauss_2d(self.n_gauss)
+        E = np.zeros((self.n_gauss_points,self.n_nodes))
+        for i , (xi,eta) in enumerate(points) : 
+            E[i] = self.shape_functions(xi,eta)
+        L = np.linalg.inv(E.T@E) @ E.T
+        return L
+        
     def jacobian(self,xi,eta,coords) : 
         """
         Jacobian of the mapping from natural to real coordinates.
@@ -106,7 +128,6 @@ class Base(ABC) :
         stress = strain @ material.D.T
         return strain , stress
             
-
 
     
         

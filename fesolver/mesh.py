@@ -30,7 +30,6 @@ class Mesh :
         self.nodes_per_element = self.connectivity.shape[1]
         self.n_dofs = self.n_nodes * 2
         
-
         for index , element in enumerate(self.connectivity) : 
             if element.max() >= self.n_nodes : 
                 raise IndexError(f'Index {element.max()} of Element {element} is out of range')
@@ -38,6 +37,11 @@ class Mesh :
                 raise IndexError(f'Index {element.min()} of Element {element} is negative')
             if len(np.unique(element)) != self.nodes_per_element : 
                 raise ValueError(f'Element {index} repeats nodes {element}')
+        
+        used = np.unique(self.connectivity)
+        if len(used) != self.n_nodes:
+            orphans = np.setdiff1d(np.arange(self.n_nodes), used)
+            raise ValueError(f'Nodes {orphans} are not used by any element')
 
     def element_coords(self,e:int) : 
         """

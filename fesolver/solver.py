@@ -1,6 +1,5 @@
 import numpy as np 
 
-
 def solve(K,F,fixed_dofs) : 
     """Solve the constrained system K u = F for nodal displacements.
 
