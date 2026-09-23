@@ -33,12 +33,34 @@ def solve(K,F,fixed_dofs) :
     Raises
     ------
     numpy.linalg.LinAlgError
-        If the reduced matrix is singular, meaning the supports do not
-        remove all three rigid-body modes.
+        If the reduced stiffness matrix is singular to working precision,
+        detected as a smallest-to-largest eigenvalue ratio below 1e-12.
+        This means the supports leave at least one rigid-body mode free --
+        typically a structure fixed at a single node, which can still
+        rotate about it.
+
+        numpy.linalg.solve does not catch this on its own. It raises only
+        on an exactly zero pivot, and roundoff turns a free rigid-body mode
+        into a small non-zero eigenvalue, so an unguarded solve returns an
+        enormous meaningless displacement instead of failing.
+
+    Notes
+    -----
+    The singularity check computes the full eigenvalue spectrum, which
+    costs about as much as the solve itself. Acceptable for dense systems;
+    to be replaced by a cheaper test when moving to sparse storage and
+    iterative solvers.
     """
     dofs = np.arange(K.shape[0])
     free_dofs = np.setdiff1d(dofs,fixed_dofs)
     K_partitioned = K[np.ix_(free_dofs,free_dofs)]
+    eigenvalues = np.linalg.eigvalsh(K_partitioned)
+    ratio = eigenvalues[0] / eigenvalues[-1]
+    if ratio < 1e-12 : 
+        raise np.linalg.LinAlgError(f"Supports do not remove all rigid-body modes: smallest-to-largest "
+                                    f"eigenvalue ratio of the reduced stiffness matrix is {ratio:.1e} "
+                                    f"(threshold 1e-12). Check that the boundary conditions prevent "
+                                    f"translation in x and y, and rotation.")
     F_partitioned = F[free_dofs]
     u_partitioned = np.linalg.solve(K_partitioned,F_partitioned)
     u = np.zeros(K.shape[0])

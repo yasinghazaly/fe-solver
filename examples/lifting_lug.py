@@ -77,7 +77,7 @@ avg = average_nodal_stresses(mesh, nodal)
 vm = von_mises(avg)
 
 print('--'*70)
-print("Displacements match reference:", np.allclose(u.reshape(8,2), u_ref))
+print("Displacements match reference:", np.allclose(u.reshape(8,2), u_ref , atol = 0))
 print("von Mises matches reference:   ", np.allclose(vm, vm_ref))
 print(f"Peak von Mises: {vm.max()/1e6:.2f} MPa at node {vm.argmax() + 1}")
 
