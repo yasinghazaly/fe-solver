@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.ipynb_checkpoints/
+scratch*.py
+*.egg-info/
