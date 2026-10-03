@@ -141,8 +141,67 @@ class Mesh :
         return anticlockwise_ordering
             
 
+def structured_quad8(length, height, nx, ny ) : 
+    """Generate a rectangular grid of 8-node quadrilateral elements.
 
+    Nodes lie on a lattice with twice the element resolution: 2*nx + 1
+    columns and 2*ny + 1 rows. Lattice points where both the column and
+    row index are odd are element centres, which a serendipity element
+    does not have, so they are skipped. The remaining points are numbered
+    row by row from the bottom-left.
 
+    Each element's connectivity is then read from a lookup table of node
+    numbers in the Quad8 local order: corners anticlockwise from
+    bottom-left, followed by midside nodes starting from the bottom edge.
+
+    Parameters
+    ----------
+    length : float
+        Extent in x, in metres.
+    height : float
+        Extent in y, in metres.
+    nx : int
+        Number of elements along x.
+    ny : int
+        Number of elements along y.
+
+    Returns
+    -------
+    Mesh
+        With (2*nx + 1)*(2*ny + 1) - nx*ny nodes and nx*ny elements,
+        numbered row by row. The bottom-left corner is at the origin.
+    """
+    n_cols = (2 * nx) + 1 
+    n_rows = (2 * ny) + 1
+    dx = length / (2 * nx)   
+    dy = height / (2 * ny)   
+    node_coords = []
+    counter = 0 
+    lookup_table = np.ones((n_rows,n_cols) , dtype = int) * -1
+    connectivity = []
+    
+    for row in range(n_rows) : 
+        for col in range(n_cols)  :
+            if row * col % 2 == 0 : 
+                lookup_table[row,col] = counter
+                node_coords.append((col*dx,row*dy))
+                counter += 1 
+      
+    for ey in range(ny) : 
+        for ex in range(nx) : 
+            col = 2 *ex
+            row = 2* ey 
+            connectivity.append([
+                lookup_table[row,col],
+                lookup_table[row,col+2],
+                lookup_table[row+2,col+2],
+                lookup_table[row+2,col],
+                lookup_table[row,col+1],
+                lookup_table[row+1,col+2],
+                lookup_table[row+2,col+1],
+                lookup_table[row+1,col],
+            ])
+    return Mesh(node_coords , connectivity)
 
 
 
