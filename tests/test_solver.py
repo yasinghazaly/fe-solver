@@ -1,8 +1,11 @@
 """Tests for the constrained solve.
 
-Uses a single CST with nodes 0 and 1 fixed and a 10 kN load in x at node 2.
-The stiffness matrix is taken straight from the element rather than through
-assembly, so a failure here points at the solver alone.
+Most tests use a single CST with nodes 0 and 1 fixed and a 10 kN load in x
+at node 2. The stiffness matrix is taken straight from the element rather
+than through assembly, so a failure here points at the solver alone.
+
+Prescribed non-zero displacements are checked on a two-spring chain small
+enough to solve by hand, and on the CST by moving both supports together.
 """
 import pytest 
 from fesolver.elements.cst import CST
@@ -14,6 +17,9 @@ import numpy as np
 THICKNESS = 0.032
 CST_COORDS = [[0,0], [0,0.1] , [-0.015,0.08]]
 CONNECTIVITY = [[0 , 1 , 2]]
+SPRING_K = np.array([[ 100.0, -100.0,    0.0],
+                     [-100.0,  200.0, -100.0],
+                     [   0.0, -100.0,  100.0]])
 
 @pytest.fixture 
 def mesh() : 
@@ -86,3 +92,48 @@ def test_underconstrained_system_is_detected(K, F, mesh):
     fixed_dofs = mesh.node_dofs([0])
     with pytest.raises(np.linalg.LinAlgError) : 
             u = solve(K,F,fixed_dofs)
+            
+def test_prescribed_displacement_two_springs():
+    """A prescribed end displacement is shared correctly along a chain.
+
+    Two equal springs in series, one end held at zero and the other pulled
+    to 0.02 with no applied force. The middle node must sit halfway. Its
+    equation is 200*u1 = 100*0 + 100*0.02, where the right-hand side is
+    exactly the coupling term the solver moves across.
+    """
+    u = solve(SPRING_K, np.zeros(3), [0, 2], [0.0, 0.02])
+    assert np.allclose(u, [0.0, 0.01, 0.02], rtol=1e-12, atol=0)
+
+
+def test_prescribed_values_are_exact(K, F, fixed_dofs):
+    """Fixed DOFs hold their prescribed values exactly.
+
+    Like zero supports, these entries are assigned by the scatter step and
+    never computed, so the comparison is exact.
+    """
+    values = np.array([1e-6, -2e-6, 3e-6, 0.5e-6])
+    u = solve(K, F, fixed_dofs, values)
+    assert np.all(u[fixed_dofs] == values)
+
+
+def test_moving_all_supports_translates_rigidly(K, mesh, fixed_dofs):
+    """Shifting every support by the same amount moves the body rigidly.
+
+    Nodes 0 and 1 are both moved 1 mm in x with no load applied. The free
+    node must follow by the same amount and the element must stay
+    unstressed. This checks the coupling term against physics: a sign
+    error or a transposed block would strain the element.
+    """
+    shift = 0.001
+    u = solve(K, np.zeros(mesh.n_dofs), fixed_dofs, [shift, 0.0, shift, 0.0])
+    assert np.isclose(u[4], shift, rtol=1e-9, atol=0)
+    assert np.isclose(u[5], 0.0, atol=1e-12)
+
+    steel = PlaneStressMaterial(209e9, 0.3)
+    strain, stress = CST().gauss_point_stresses(CST_COORDS, steel, u)
+    assert np.allclose(stress, 0, atol=1)
+
+
+def test_mismatched_fixed_values_raise(K, F, fixed_dofs):
+    with pytest.raises(ValueError):
+        solve(K, F, fixed_dofs, [0.0, 0.0])
