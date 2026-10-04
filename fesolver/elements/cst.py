@@ -17,6 +17,8 @@ class CST(Base) :
     n_nodes = 3
     n_gauss = 1
     n_gauss_points = 1
+    boundary_order = [0,1,2,0]
+    triangles = [(0, 1, 2)]
     
     def shape_functions(self,xi,eta) : 
         """Shape function values at (xi, eta), shape (3,)."""
