@@ -1,4 +1,5 @@
 # fe-solver
+![tests](https://github.com/yasinghazaly/fe-solver/actions/workflows/tests.yml/badge.svg)
 
 `fe-solver` is a 2D plane-stress finite element package written in Python. It is built around the 8-node serendipity quadrilateral (Quad8), with the constant strain triangle (CST) included as a second element. The package covers the full chain of a linear elastic analysis: meshing, stiffness assembly, edge loads, solution, stress recovery, error norms and plotting.
 
