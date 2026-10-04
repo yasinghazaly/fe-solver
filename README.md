@@ -96,7 +96,7 @@ SI units (m, N, Pa) are used throughout the package. The DOF order is `[u1, v1, 
 Python 3.10 or later is required. The package was developed on Python 3.12.
 
 ```bash
-git clone <repository url>
+git clone https://github.com/yasinghazaly/fe-solver.git
 cd fe-solver
 pip install -e .
 pip install pytest
