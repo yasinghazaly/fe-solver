@@ -110,7 +110,7 @@ def von_mises(stress) :
     vm = np.sqrt((stress[:,0]**2) - (stress[:,0]*stress[:,1]) + (stress[:,1]**2) + (3*(stress[:,2]**2)))
     return vm
 
-def plot_deformed_shape(mesh,u,scale_factor,element_cls) : 
+def plot_deformed_shape(mesh,u,scale_factor,element_cls, save_path = None) : 
     """Draw the mesh before and after loading.
 
     Every node is moved by its displacement multiplied by a scale factor,
@@ -157,10 +157,12 @@ def plot_deformed_shape(mesh,u,scale_factor,element_cls) :
     plt.title(f"Deformed shape (displacements scaled x{scale_factor})")
     plt.grid(alpha=0.2)
     plt.tight_layout()
+    if save_path is not None :
+        plt.savefig(save_path, dpi=200)
     plt.show()
 
     
-def plot_von_mises(mesh, vm, element_cls):
+def plot_von_mises(mesh, vm, element_cls, save_path = None):
     """Filled contour plot of nodal von Mises stress on the undeformed mesh.
 
     Contours are filled across triangles, so each element is first split
@@ -209,6 +211,8 @@ def plot_von_mises(mesh, vm, element_cls):
     plt.ylabel("y (m)")
     plt.title("Von Mises stress")
     plt.tight_layout()
+    if save_path is not None :
+        plt.savefig(save_path, dpi=200)
     plt.show()
     
     
