@@ -17,6 +17,8 @@ class Quad8(Base) :
     n_nodes = 8 
     n_gauss = 3
     n_gauss_points = 9 
+    boundary_order = [0,4,1,5,2,6,3,7,0]
+    triangles = [(0, 4, 7), (4, 1, 5), (5, 2, 6), (6, 3, 7), (4, 5, 6), (4, 6, 7)]
     
     def shape_functions(self,xi,eta) : 
         """Shape function values, shape (8,)."""
