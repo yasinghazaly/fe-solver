@@ -70,7 +70,106 @@ def solve(K,F,fixed_dofs , fixed_values = None) :
     u[fixed_dofs] = fixed_values
     return u
     
+def sparse_solve(K,F,fixed_dofs,fixed_values = None) : 
+    """Solve the constrained system K u = F with K stored as CSR.
+
+    Constraints are applied by partitioning, as in solve. The DOFs are
+    split into free (f) and fixed (c), giving
+
+        K_ff u_f = F_f - K_fc u_c
+
+    where u_c holds the prescribed displacements. The fixed rows and
+    columns are removed and the free DOFs are renumbered, which gives a
+    smaller CSR matrix K_ff. The K_fc u_c term is zero for supports held
+    at zero, and otherwise acts as a load on the free DOFs next to a moved
+    support. The reduced system is solved for u_f, and the answer is
+    scattered back into a full-length vector.
+
+    K is not modified, so reactions can be recovered afterwards as
+    K.matvec(u) - F at the fixed DOFs.
+
+    Parameters
+    ----------
+    K : CSR
+        Global stiffness matrix from assembly_stiffness_csr.
+    F : ndarray, shape (n,)
+        Global load vector. Entries at fixed DOFs are not used in the solve.
+    fixed_dofs : array_like of int
+        Global indices of the constrained DOFs, in any order.
+    fixed_values : array_like of float, optional
+        Prescribed displacement in metres at each fixed DOF, in the same
+        order as fixed_dofs. Defaults to zero at every fixed DOF.
+
+    Returns
+    -------
+    ndarray, shape (n,)
+        Nodal displacements in metres, equal to the prescribed values at
+        the fixed DOFs.
+
+    Raises
+    ------
+    ValueError
+        If fixed_values and fixed_dofs differ in length.
+    """
+    if fixed_values is None :
+        fixed_values = np.zeros(len(fixed_dofs))
+    else : 
+        fixed_values = np.array(fixed_values , dtype = float)
+        if len(fixed_values) != len(fixed_dofs): 
+            raise ValueError(f"fixed_values has {len(fixed_values)} entries but fixed_dofs has "
+                            f"{len(fixed_dofs)}. Give one prescribed displacement per fixed DOF, "
+                            f"in the same order.")
+    dofs = np.arange(K.n)
+    free_dofs = np.setdiff1d(dofs,fixed_dofs)
     
+    new_number = np.ones(K.n , dtype= int ) *-1
+    for index, value in enumerate(free_dofs) : 
+        new_number[value] = index
         
+    prescribed = np.zeros(K.n , dtype = float)
+    for index,value in enumerate(fixed_dofs): 
+        prescribed[value] = fixed_values[index]
+        
+    F_rhs = []
+    for index,value in enumerate(new_number) : 
+        if value != -1 : 
+            F_rhs.append(F[index])   
+               
+    rows = []
+    cols = []
+    vals =[] 
+    for row in range(K.n) : 
+        start = K.indptr[row]
+        end = K.indptr[row+1]
+        for position in range(start,end,1) : 
+            if new_number[row] != -1 : 
+                if new_number[K.indices[position]] != -1 : 
+                    rows.append(new_number[row])
+                    cols.append(new_number[K.indices[position]])
+                    vals.append(K.data[position])
+                elif new_number[K.indices[position]] == -1 : 
+                    F_rhs[new_number[row]] -= K.data[position] * prescribed[K.indices[position]]
+              
+    K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs)).to_dense()
+    u_f = np.linalg.solve(K_ff,F_rhs)
     
+    for index,value in enumerate(free_dofs) : 
+        prescribed[value] = u_f[index]
+    u = prescribed
+    return u 
+    
+    
+from fesolver.sparse import CSR
+    
+rows = np.array([0, 3, 5, 4, 2, 3, 3, 4, 4, 1, 1, 1, 1, 2, 0, 2, 4, 3, 2, 5])
+cols = np.array([1, 2, 4, 4, 2, 3, 3, 5, 4, 0, 1, 1, 2, 2, 0, 3, 3, 4, 1, 5])
+vals = np.array([-100, -50, -300, 300, 200, 50, 100, -300, 100, -100, 100, 200, -200, 50, 100, -50, -100, -100, -200, 300])
+K = CSR(rows, cols, vals, 6)
+
+
+F = np.array([0, 10, 0, 0, -5, 0.0])
+fixed_dofs = [4, 1]               # not in sorted order on purpose
+fixed_values = [-0.5, 0.5]        # DOF 4 → -0.5, DOF 1 → +0.5
+    
+sparse_solve(K,F,fixed_dofs,fixed_values)
     
