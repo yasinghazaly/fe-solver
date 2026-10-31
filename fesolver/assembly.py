@@ -2,6 +2,7 @@ from fesolver.mesh import Mesh
 from fesolver.materials import PlaneStressMaterial
 from fesolver.elements.cst import CST 
 from fesolver.elements.quad8 import Quad8 
+from fesolver.sparse import CSR
 import numpy as np 
 
 def assembly_stiffness(mesh,element_cls,material,thickness) : 
@@ -41,4 +42,29 @@ def assembly_stiffness(mesh,element_cls,material,thickness) :
         K[np.ix_(dofs,dofs)] += k_e
     return K 
 
+def assemble_triplets(mesh,element_cls,material,thickness) : 
+    element = element_cls()
+    rows = []
+    cols = []
+    vals = []
+    for e in range(mesh.n_elements) : 
+        coords = mesh.element_coords(e)
+        k_e = element.stiffness(coords,material,thickness)
+        dofs = mesh.element_dofs(e)
+        row = np.repeat(dofs,len(dofs))
+        col = np.tile(dofs,len(dofs))
+        val = np.ravel(k_e)
+        rows.append(row)
+        cols.append(col)
+        vals.append(val)
+    rows = np.concatenate(rows)
+    cols = np.concatenate(cols)
+    vals = np.concatenate(vals)
+    return rows,cols,vals
 
+def assembly_stiffness_csr(mesh,element_cls,material,thickness) : 
+    rows, cols, vals = assemble_triplets(mesh,element_cls,material,thickness)
+    K = CSR(rows,cols,vals,mesh.n_dofs)
+    return K 
+    
+        
