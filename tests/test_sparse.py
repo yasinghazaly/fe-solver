@@ -240,7 +240,9 @@ def cantilever():
 
 def test_sparse_solve_matches_dense_zero_supports(cantilever):
     K_dense, K_csr, F, fixed = cantilever
-    assert np.allclose(sparse_solve(K_csr, F, fixed), solve(K_dense, F, fixed), rtol=1e-8, atol=0)
+    u_dense = solve(K_dense, F, fixed)
+    assert np.allclose(sparse_solve(K_csr, F, fixed), u_dense,
+                       rtol=1e-8, atol=1e-8 * np.max(np.abs(u_dense)))
 
 
 def test_sparse_solve_matches_dense_nonzero_supports(cantilever):
@@ -248,11 +250,28 @@ def test_sparse_solve_matches_dense_nonzero_supports(cantilever):
     K_dense, K_csr, F, fixed = cantilever
     values = 1e-5 * np.random.default_rng(0).standard_normal(len(fixed))
     u_sparse = sparse_solve(K_csr, F, fixed, values)
-    assert np.allclose(u_sparse, solve(K_dense, F, fixed, values), rtol=1e-8, atol=0)
+    u_dense = solve(K_dense, F, fixed, values)
+    assert np.allclose(u_sparse, u_dense, rtol=1e-8, atol=1e-8 * np.max(np.abs(u_dense)))
     assert np.all(u_sparse[fixed] == values)
-
 
 def test_sparse_solve_mismatched_fixed_values_raise(cantilever):
     _, K_csr, F, fixed = cantilever
     with pytest.raises(ValueError):
         sparse_solve(K_csr, F, fixed, [0.0, 0.0])
+        
+def test_diagonal_hand_example():
+    """Row 1 is empty and row 2 has no (2, 2) entry, so both give zero."""
+    K = CSR(ROWS_4, COLS_4, VALS_4, 4)
+    assert np.allclose(K.diagonal(), [10, 0, 0, 7], rtol=1e-14, atol=0)
+
+def test_diagonal_matches_dense(case):
+    """The diagonal equals the diagonal of the dense assembly."""
+    mesh, element_cls, t = case
+    K = assembly_stiffness_csr(mesh, element_cls, STEEL, t)
+    expected = np.diag(assembly_stiffness(mesh, element_cls, STEEL, t))
+    assert np.allclose(K.diagonal(), expected, rtol=1e-12, atol=0)
+
+def test_diagonal_is_a_vector_of_length_n(case):
+    mesh, element_cls, t = case
+    K = assembly_stiffness_csr(mesh, element_cls, STEEL, t)
+    assert K.diagonal().shape == (K.n,)

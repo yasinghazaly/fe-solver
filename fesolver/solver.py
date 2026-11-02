@@ -1,4 +1,6 @@
 import numpy as np 
+from fesolver.sparse import CSR
+from fesolver.iterative import cg
 
 def solve(K,F,fixed_dofs , fixed_values = None) : 
     """Solve the constrained system K u = F for nodal displacements.
@@ -70,7 +72,7 @@ def solve(K,F,fixed_dofs , fixed_values = None) :
     u[fixed_dofs] = fixed_values
     return u
     
-def sparse_solve(K,F,fixed_dofs,fixed_values = None) : 
+def sparse_solve(K,F,fixed_dofs,fixed_values = None,jacobi : bool = True) : 
     """Solve the constrained system K u = F with K stored as CSR.
 
     Constraints are applied by partitioning, as in solve. The DOFs are
@@ -150,26 +152,20 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None) :
                 elif new_number[K.indices[position]] == -1 : 
                     F_rhs[new_number[row]] -= K.data[position] * prescribed[K.indices[position]]
               
-    K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs)).to_dense()
-    u_f = np.linalg.solve(K_ff,F_rhs)
+    F_rhs = np.asarray(F_rhs)
+    K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs))
     
+    if jacobi : 
+        M = K_ff.diagonal() 
+    else : 
+        M = None
+        
+    u_f , history= cg(K = K_ff, b =  F_rhs ,M = M)
+    
+    print(len(history) - 1)
+        
     for index,value in enumerate(free_dofs) : 
         prescribed[value] = u_f[index]
     u = prescribed
     return u 
-    
-    
-from fesolver.sparse import CSR
-    
-rows = np.array([0, 3, 5, 4, 2, 3, 3, 4, 4, 1, 1, 1, 1, 2, 0, 2, 4, 3, 2, 5])
-cols = np.array([1, 2, 4, 4, 2, 3, 3, 5, 4, 0, 1, 1, 2, 2, 0, 3, 3, 4, 1, 5])
-vals = np.array([-100, -50, -300, 300, 200, 50, 100, -300, 100, -100, 100, 200, -200, 50, 100, -50, -100, -100, -200, 300])
-K = CSR(rows, cols, vals, 6)
-
-
-F = np.array([0, 10, 0, 0, -5, 0.0])
-fixed_dofs = [4, 1]               # not in sorted order on purpose
-fixed_values = [-0.5, 0.5]        # DOF 4 → -0.5, DOF 1 → +0.5
-    
-sparse_solve(K,F,fixed_dofs,fixed_values)
     

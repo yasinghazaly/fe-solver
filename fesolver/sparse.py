@@ -112,9 +112,53 @@ class CSR :
             y[row] = self.data[start:end] @ x[self.indices[start:end]]
         return y 
     
+    def diagonal(self) : 
+        M = []
+        for row in range(self.n) : 
+            start = self.indptr[row]
+            end = self.indptr[row+1]
+            cols = self.indices[start:end]
+            if row in cols : 
+                index = np.where(cols == row)[0][0]
+                M.append(self.data[start+index])
+            else : 
+                M.append(0)
+        return np.asarray(M)
+         
+    def lower_triangle(self) : 
+        rows = []
+        cols = []
+        vals = []
+        for row in range(self.n) :
+            start = self.indptr[row]
+            end = self.indptr[row+1]
+            for position in range(start,end,1) :
+                if self.indices[position] <= row : 
+                    rows.append(row)
+                    cols.append(self.indices[position])
+                    vals.append(self.data[position])
+                    
+        return CSR(np.asarray(rows),np.asarray(cols),np.asarray(vals),self.n)
     
-
-
-
-
-
+    def incomplete_cholesky(self) : 
+            L = self.lower_triangle()
+            for row in range(L.n) :
+                memory = {}
+                start = L.indptr[row]
+                end = L.indptr[row+1]
+                for position in range(start,end,1) :
+                    row_sum = 0
+                    if row == L.indices[position] : 
+                        for value in memory.values(): 
+                            row_sum += value**2
+                        L.data[position] = np.sqrt(L.data[position] - row_sum)
+                    elif row != L.indices[position] : 
+                        j = L.indices[position]
+                        column_sum = 0 
+                        for q in range(L.indptr[j], L.indptr[j+1] - 1) : 
+                            k = L.indices[q]
+                            if k in memory : 
+                                column_sum += memory[k] * L.data[q]
+                        L.data[position] = (1/L.data[L.indptr[L.indices[position]+1]-1]) * (L.data[position] - column_sum)
+                        memory[L.indices[position]] = L.data[position]
+            return L
