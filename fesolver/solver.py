@@ -72,7 +72,7 @@ def solve(K,F,fixed_dofs , fixed_values = None) :
     u[fixed_dofs] = fixed_values
     return u
     
-def sparse_solve(K,F,fixed_dofs,fixed_values = None,jacobi : bool = True) : 
+def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = "jacobi" or "ic0" or None ) : 
     """Solve the constrained system K u = F with K stored as CSR.
 
     Constraints are applied by partitioning, as in solve. The DOFs are
@@ -155,14 +155,9 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None,jacobi : bool = True) :
     F_rhs = np.asarray(F_rhs)
     K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs))
     
-    if jacobi : 
-        M = K_ff.diagonal() 
-    else : 
-        M = None
-        
-    u_f , history= cg(K = K_ff, b =  F_rhs ,M = M)
+
+    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner)
     
-    print(len(history) - 1)
         
     for index,value in enumerate(free_dofs) : 
         prescribed[value] = u_f[index]

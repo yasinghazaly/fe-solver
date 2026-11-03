@@ -187,10 +187,9 @@ class CSR :
                 vals.append(self.data[position])        
         return CSR(np.asarray(cols),np.asarray(rows),np.asarray(vals),self.n)
               
-    def backward_solve(self,L,y) : 
-        z = np.zeros(L.n)
-        L_transposed = L.transpose()
-        for row in range(L.n-1, -1, -1) : 
+    def backward_solve(self,L_transposed,y) : 
+        z = np.zeros(L_transposed.n)
+        for row in range(L_transposed.n-1, -1, -1) : 
             start = L_transposed.indptr[row]
             end = L_transposed.indptr[row+1]
             row_sum = 0 
@@ -199,7 +198,4 @@ class CSR :
             z[row] = ((y[row] - row_sum) / L_transposed.data[start])
         return z
                        
-    
-                    
-                    
-                
+          
