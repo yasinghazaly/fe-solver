@@ -162,3 +162,44 @@ class CSR :
                         L.data[position] = (1/L.data[L.indptr[L.indices[position]+1]-1]) * (L.data[position] - column_sum)
                         memory[L.indices[position]] = L.data[position]
             return L
+
+    def forward_solve(self,L,r) : 
+        y = []
+        for row in range(L.n) : 
+            start = L.indptr[row]
+            end = L.indptr[row+1]
+            row_sum = 0 
+            for position in range(start,end-1) : 
+                row_sum += L.data[position] * y[L.indices[position]]
+            y.append((r[row] - row_sum) / L.data[end-1])
+        return y
+    
+    def transpose(self) : 
+        rows = []
+        cols = []
+        vals = []
+        for row in range(self.n) :
+            start = self.indptr[row]
+            end = self.indptr[row+1]
+            for position in range(start,end,1) :
+                rows.append(row)
+                cols.append(self.indices[position])
+                vals.append(self.data[position])        
+        return CSR(np.asarray(cols),np.asarray(rows),np.asarray(vals),self.n)
+              
+    def backward_solve(self,L,y) : 
+        z = np.zeros(L.n)
+        L_transposed = L.transpose()
+        for row in range(L.n-1, -1, -1) : 
+            start = L_transposed.indptr[row]
+            end = L_transposed.indptr[row+1]
+            row_sum = 0 
+            for position in range(start+1,end) : 
+                row_sum += L_transposed.data[position] * z[L_transposed.indices[position]]
+            z[row] = ((y[row] - row_sum) / L_transposed.data[start])
+        return z
+                       
+    
+                    
+                    
+                
