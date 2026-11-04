@@ -86,7 +86,7 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     at zero, and otherwise acts as a load on the free DOFs next to a moved
     support. The reduced system is solved for u_f, and the answer is
     scattered back into a full-length vector. K_ff is solved iteratively 
-    by conjugate gradients (cg), never densely.An optional preconditioner 
+    by conjugate gradients (cg), never densely. An optional preconditioner 
     reduces the number of iterations: Jacobi divides by the diagonal 
     of K_ff, and IC(0) uses an incomplete Cholesky factor L, so that 
     L L^T approximates K_ff.
@@ -114,20 +114,37 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     ndarray, shape (n,)
         Nodal displacements in metres, equal to the prescribed values at
         the fixed DOFs.
+    history : ndarray
+        Relative residual of cg at the start and after each iteration, so
+        its length is the number of iterations plus one.
 
     Raises
     ------
     ValueError
         If fixed_values and fixed_dofs differ in length.
+        Raises
+    ValueError
+        If fixed_values and fixed_dofs differ in length, or if cg rejects
+        its inputs: an all-zero reduced load, a Jacobi diagonal with zero,
+        negative or NaN entries, or an IC(0) breakdown.
+
     """
+    K_ff , F_rhs , free_dofs, prescribed = partition_csr(K,F,fixed_dofs, fixed_values)
+    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner)
+    for index,value in enumerate(free_dofs) : 
+        prescribed[value] = u_f[index]
+    u = prescribed
+    return u , history
+    
+def partition_csr(K,F,fixed_dofs,fixed_values = None) : 
     if fixed_values is None :
-        fixed_values = np.zeros(len(fixed_dofs))
+            fixed_values = np.zeros(len(fixed_dofs))
     else : 
-        fixed_values = np.array(fixed_values , dtype = float)
-        if len(fixed_values) != len(fixed_dofs): 
-            raise ValueError(f"fixed_values has {len(fixed_values)} entries but fixed_dofs has "
-                            f"{len(fixed_dofs)}. Give one prescribed displacement per fixed DOF, "
-                            f"in the same order.")
+            fixed_values = np.array(fixed_values , dtype = float)
+            if len(fixed_values) != len(fixed_dofs): 
+                raise ValueError(f"fixed_values has {len(fixed_values)} entries but fixed_dofs has "
+                                f"{len(fixed_dofs)}. Give one prescribed displacement per fixed DOF, "
+                                f"in the same order.")
     dofs = np.arange(K.n)
     free_dofs = np.setdiff1d(dofs,fixed_dofs)
     
@@ -143,7 +160,7 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     for index,value in enumerate(new_number) : 
         if value != -1 : 
             F_rhs.append(F[index])   
-               
+                
     rows = []
     cols = []
     vals =[] 
@@ -158,14 +175,10 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
                     vals.append(K.data[position])
                 elif new_number[K.indices[position]] == -1 : 
                     F_rhs[new_number[row]] -= K.data[position] * prescribed[K.indices[position]]
-              
+                
     F_rhs = np.asarray(F_rhs)
     K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs))
     
-    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner)
-
-    for index,value in enumerate(free_dofs) : 
-        prescribed[value] = u_f[index]
-    u = prescribed
-    return u , history
+    return K_ff , F_rhs, free_dofs, prescribed
     
+        

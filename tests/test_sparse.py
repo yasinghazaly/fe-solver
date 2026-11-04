@@ -187,7 +187,7 @@ def test_sparse_solve_chain_with_prescribed_end():
     cols = np.array([0, 1, 0, 1, 1, 2, 1, 2])
     vals = np.array([100., -100., -100., 100., 100., -100., -100., 100.])
     K = CSR(rows, cols, vals, 3)
-    u = sparse_solve(K, np.zeros(3), [0], [0.02])
+    u, _= sparse_solve(K, np.zeros(3), [0], [0.02])
     assert np.allclose(u, [0.02, 0.02, 0.02], rtol=1e-12, atol=0)
 
 
@@ -195,7 +195,7 @@ def test_sparse_solve_unsorted_fixed_dofs_and_loads():
     """Fixed DOFs given out of order, with loads and non-zero supports, match the hand answer."""
     K = CSR(CHAIN_ROWS, CHAIN_COLS, CHAIN_VALS, 6)
     F = np.array([0.0, 10.0, 0.0, 0.0, -5.0, 0.0])
-    u = sparse_solve(K, F, [4, 1], [-0.5, 0.5])
+    u,_ = sparse_solve(K, F, [4, 1], [-0.5, 0.5])
     expected = [0.5, 0.5, 5.0 / 14.0, -3.0 / 14.0, -0.5, -0.5]
     assert np.allclose(u, expected, rtol=1e-8, atol=0)
     assert u[4] == -0.5 and u[1] == 0.5
@@ -205,7 +205,7 @@ def test_sparse_solve_reactions_balance_applied_load():
     """Support forces sum to minus the applied load: physics, independent of stored numbers."""
     K = CSR(CHAIN_ROWS, CHAIN_COLS, CHAIN_VALS, 6)
     F = np.array([0.0, 10.0, 0.0, 0.0, -5.0, 0.0])
-    u = sparse_solve(K, F, [4, 1], [-0.5, 0.5])
+    u,_ = sparse_solve(K, F, [4, 1], [-0.5, 0.5])
     reactions = (K.matvec(u) - F)[[4, 1]]
     assert np.isclose(reactions.sum(), -F.sum(), rtol=1e-9, atol=0)
 
@@ -241,7 +241,7 @@ def cantilever():
 def test_sparse_solve_matches_dense_zero_supports(cantilever):
     K_dense, K_csr, F, fixed = cantilever
     u_dense = solve(K_dense, F, fixed)
-    assert np.allclose(sparse_solve(K_csr, F, fixed), u_dense,
+    assert np.allclose(sparse_solve(K_csr, F, fixed)[0], u_dense,
                        rtol=1e-8, atol=1e-8 * np.max(np.abs(u_dense)))
 
 
@@ -249,7 +249,7 @@ def test_sparse_solve_matches_dense_nonzero_supports(cantilever):
     """Arbitrary non-zero support values exercise the coupling term on a real mesh."""
     K_dense, K_csr, F, fixed = cantilever
     values = 1e-5 * np.random.default_rng(0).standard_normal(len(fixed))
-    u_sparse = sparse_solve(K_csr, F, fixed, values)
+    u_sparse,_ = sparse_solve(K_csr, F, fixed, values)
     u_dense = solve(K_dense, F, fixed, values)
     assert np.allclose(u_sparse, u_dense, rtol=1e-8, atol=1e-8 * np.max(np.abs(u_dense)))
     assert np.all(u_sparse[fixed] == values)

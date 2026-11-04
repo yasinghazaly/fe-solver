@@ -73,8 +73,6 @@ def fe_system():
     return dense_to_csr(K_ff, symmetric_pattern=True), b, np.linalg.solve(K_ff, b)
 
 
-# ---------------------------------------------------------------- hand cases
-
 def test_two_by_two_converges_in_two_iterations():
     """In exact arithmetic CG needs at most n iterations for an n x n system."""
     x, history = cg(dense_to_csr(K_2), B_2)
@@ -134,8 +132,6 @@ def test_starting_guess_is_not_modified():
     assert np.all(x0 == [0.5, 0.5])
 
 
-# ---------------------------------------------------------- stopping rule
-
 def test_max_iter_reached_warns():
     with pytest.warns(UserWarning, match="max_iter"):
         _, history = cg(dense_to_csr(K_2), B_2, max_iter=1)
@@ -156,9 +152,6 @@ def test_looser_tolerance_stops_earlier(fe_system):
     _, loose = cg(K, b, tol=1e-4)
     assert len(loose) < len(tight)
     assert loose[-1] <= 1e-4
-
-
-# ------------------------------------------------------------ input checks
 
 def test_zero_right_hand_side_raises():
     with pytest.raises(ValueError, match="all zeros"):
@@ -192,13 +185,9 @@ def test_ic0_breakdown_raises():
     with pytest.raises(ValueError, match="IC\\(0\\) broke down"):
         cg(dense_to_csr([[1.0, 2.0], [2.0, 1.0]]), B_2, preconditioner="ic0")
 
-
-# --------------------------------------------------------- apply step alone
-
 def test_apply_without_preconditioner_returns_r():
     r = np.array([1.0, -2.0, 3.0])
     assert np.all(apply_preconditioner(None, None, r, None, None) == r)
-
 
 def test_apply_jacobi_divides_by_the_diagonal():
     r = np.array([2.0, 6.0])
@@ -213,8 +202,6 @@ def test_apply_ic0_solves_with_L_and_its_transpose():
     z = apply_preconditioner(L, L.transpose(), r, None, "ic0")
     assert np.allclose(z, [1.0, 0.0, 1.0], rtol=1e-14, atol=0)
 
-
-# ------------------------------------------------ real finite element matrix
 
 @pytest.mark.parametrize("preconditioner", PRECONDITIONERS)
 def test_every_preconditioner_matches_the_direct_solve(fe_system, preconditioner):
@@ -243,8 +230,6 @@ def test_ic0_factor_is_valid_on_an_fe_matrix(fe_system):
     assert np.all(np.isfinite(diagonal)) and np.all(diagonal > 0)
 
 
-# ---------------------------------------------- through sparse_solve
-
 @pytest.mark.parametrize("preconditioner", PRECONDITIONERS)
 def test_sparse_solve_with_each_preconditioner_matches_dense(preconditioner):
     """Non-zero supports exercise the coupling term with every preconditioner."""
@@ -260,6 +245,6 @@ def test_sparse_solve_with_each_preconditioner_matches_dense(preconditioner):
     F[2 * corner + 1] = -1000.0
     values = 1e-5 * np.random.default_rng(1).standard_normal(len(fixed))
     u_dense = solve(K_dense, F, fixed, values)
-    u_sparse = sparse_solve(K_csr, F, fixed, values, preconditioner=preconditioner)
+    u_sparse, _ = sparse_solve(K_csr, F, fixed, values, preconditioner=preconditioner)
     assert np.allclose(u_sparse, u_dense, rtol=1e-6, atol=1e-6 * np.max(np.abs(u_dense)))
     assert np.all(u_sparse[fixed] == values)
