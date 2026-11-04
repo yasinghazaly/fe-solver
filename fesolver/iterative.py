@@ -1,8 +1,60 @@
+"""Preconditioned conjugate gradient solver for sparse symmetric systems."""
 import numpy as np 
 import warnings
 
 def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :  
-    
+    """Solve K x = b by the preconditioned conjugate gradient method.
+ 
+    K must be symmetric positive definite, as the reduced stiffness matrix
+    K_ff is once the supports remove every rigid-body mode. Each iteration
+    needs one matrix-vector product and one application of the
+    preconditioner, so K is never factorised or stored densely.
+ 
+    The preconditioner is set up once before the loop. Jacobi takes the
+    inverse of the diagonal of K. IC(0) builds the incomplete Cholesky
+    factor L and its transpose, and is then applied as a forward solve
+    with L followed by a backward solve with L^T. M = L L^T is never formed.
+ 
+    The iteration stops when the relative residual |r| / |b| falls to tol.
+ 
+    Parameters
+    ----------
+    K : CSR
+        Symmetric positive definite matrix.
+    b : ndarray, shape (n,)
+        Right-hand side. Must not be all zeros.
+    preconditioner : {None, "jacobi", "ic0"}, optional
+        None gives plain CG. Defaults to None.
+    x0 : ndarray, shape (n,), optional
+        Starting guess. Defaults to zero. It is not modified.
+    tol : float, optional
+        Target relative residual. Defaults to 1e-8.
+    max_iter : int, optional
+        Largest number of iterations. Defaults to 10 * n.
+ 
+    Returns
+    -------
+    x : ndarray, shape (n,)
+        The solution.
+    history : ndarray
+        Relative residual at the start and after each iteration, so its
+        length is the number of iterations plus one. With x0 = 0 the first
+        entry is 1.
+ 
+    Raises
+    ------
+    ValueError
+        If b is all zeros; for "jacobi", if the diagonal has the wrong
+        length or any entry that is zero, negative or NaN; for "ic0", if
+        the factorisation breaks down (a zero, negative or NaN diagonal
+        entry of L).
+ 
+    Warns
+    -----
+    UserWarning
+        If max_iter is reached and the final relative residual is still
+        above tol.
+    """
     if x0 is None : 
         x0 = np.zeros(len(b))
     if max_iter is None : 
@@ -89,14 +141,33 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
     return x, np.array(history)
 
 def apply_preconditioner(L,L_transposed, r, M_inv, preconditioner = None) : 
+    """Apply the preconditioner to a residual: return z = M^-1 r.
+ 
+    Called once per CG iteration. Everything expensive (L, L^T and M_inv)
+    is built beforehand by cg, so this step only does the cheap work.
+ 
+    Parameters
+    ----------
+    L, L_transposed : CSR or None
+        IC(0) factor and its transpose. Used only for "ic0".
+    r : ndarray, shape (n,)
+        Residual.
+    M_inv : ndarray or None
+        Reciprocal of the diagonal of K. Used only for "jacobi".
+    preconditioner : {None, "jacobi", "ic0"}, optional
+        Defaults to None.
+ 
+    Returns
+    -------
+    ndarray, shape (n,)
+        M_inv * r for "jacobi"; the result of solving L y = r and then
+        L^T z = y for "ic0"; r itself for None.
+    """
     if preconditioner == "jacobi" : 
         z = M_inv * r
-        
     elif preconditioner == "ic0" : 
         y = L.forward_solve(L,r)
         z = L.backward_solve(L_transposed,y)
-    
     else : 
-        z = r
-        
+        z = r  
     return z

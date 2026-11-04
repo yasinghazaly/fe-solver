@@ -72,7 +72,7 @@ def solve(K,F,fixed_dofs , fixed_values = None) :
     u[fixed_dofs] = fixed_values
     return u
     
-def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = "jacobi" or "ic0" or None ) : 
+def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) : 
     """Solve the constrained system K u = F with K stored as CSR.
 
     Constraints are applied by partitioning, as in solve. The DOFs are
@@ -85,7 +85,11 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = "jacobi" o
     smaller CSR matrix K_ff. The K_fc u_c term is zero for supports held
     at zero, and otherwise acts as a load on the free DOFs next to a moved
     support. The reduced system is solved for u_f, and the answer is
-    scattered back into a full-length vector.
+    scattered back into a full-length vector. K_ff is solved iteratively 
+    by conjugate gradients (cg), never densely.An optional preconditioner 
+    reduces the number of iterations: Jacobi divides by the diagonal 
+    of K_ff, and IC(0) uses an incomplete Cholesky factor L, so that 
+    L L^T approximates K_ff.
 
     K is not modified, so reactions can be recovered afterwards as
     K.matvec(u) - F at the fixed DOFs.
@@ -101,6 +105,9 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = "jacobi" o
     fixed_values : array_like of float, optional
         Prescribed displacement in metres at each fixed DOF, in the same
         order as fixed_dofs. Defaults to zero at every fixed DOF.
+    preconditioner : {None, "jacobi", "ic0"}, optional
+        Preconditioner for cg. None gives plain CG; "ic0" usually needs
+        far fewer iterations than "jacobi". Defaults to None.
 
     Returns
     -------
@@ -155,12 +162,10 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = "jacobi" o
     F_rhs = np.asarray(F_rhs)
     K_ff = CSR(np.asarray(rows,dtype=int),np.asarray(cols,dtype= int),np.asarray(vals,dtype=float),len(free_dofs))
     
-
     u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner)
-    
-        
+
     for index,value in enumerate(free_dofs) : 
         prescribed[value] = u_f[index]
     u = prescribed
-    return u 
+    return u , history
     

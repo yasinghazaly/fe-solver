@@ -113,6 +113,15 @@ class CSR :
         return y 
     
     def diagonal(self) : 
+        """Return the diagonal as a vector of length n.
+ 
+        A row with no stored diagonal entry gives zero. Used by the Jacobi
+        preconditioner.
+ 
+        Returns
+        -------
+        ndarray, shape (n,)
+        """
         M = []
         for row in range(self.n) : 
             start = self.indptr[row]
@@ -126,6 +135,17 @@ class CSR :
         return np.asarray(M)
          
     def lower_triangle(self) : 
+        """Return the lower triangle, diagonal included, as a new CSR.
+ 
+        Keeps every stored entry with column <= row. Because columns
+        increase within each row, the diagonal is the last stored entry of
+        each row, at indptr[i + 1] - 1. The original matrix is unchanged.
+ 
+        Returns
+        -------
+        CSR
+            Same size, holding only the lower triangle.
+        """
         rows = []
         cols = []
         vals = []
@@ -141,29 +161,75 @@ class CSR :
         return CSR(np.asarray(rows),np.asarray(cols),np.asarray(vals),self.n)
     
     def incomplete_cholesky(self) : 
-            L = self.lower_triangle()
-            for row in range(L.n) :
-                memory = {}
-                start = L.indptr[row]
-                end = L.indptr[row+1]
-                for position in range(start,end,1) :
-                    row_sum = 0
-                    if row == L.indices[position] : 
-                        for value in memory.values(): 
-                            row_sum += value**2
-                        L.data[position] = np.sqrt(L.data[position] - row_sum)
-                    elif row != L.indices[position] : 
-                        j = L.indices[position]
-                        column_sum = 0 
-                        for q in range(L.indptr[j], L.indptr[j+1] - 1) : 
-                            k = L.indices[q]
-                            if k in memory : 
-                                column_sum += memory[k] * L.data[q]
-                        L.data[position] = (1/L.data[L.indptr[L.indices[position]+1]-1]) * (L.data[position] - column_sum)
-                        memory[L.indices[position]] = L.data[position]
-            return L
+        """Incomplete Cholesky factor with zero fill-in, IC(0).
+ 
+        Finds a lower-triangular L with exactly the pattern of the
+        lower triangle of K, so that L L^T equals K at every stored
+        position. Exact Cholesky would create new non-zeros (fill-in);
+        IC(0) drops them, which keeps L as sparse as K but makes
+        L L^T only an approximation of K.
+
+        L is built row by row. For an off-diagonal entry (i, j),
+
+            L(i, j) = (K(i, j) - sum of L(i, k) L(j, k)) / L(j, j)
+
+        summed over the columns k < j stored in both rows i and j. The
+        diagonal is
+
+            L(i, i) = sqrt(K(i, i) - sum of L(i, k)^2)
+
+        over the entries already found in row i.
+
+        The factorisation can break down for a symmetric positive
+        definite matrix that is not diagonally dominant, when the value
+        under the square root is negative. The result is then NaN
+        (numpy warns); cg checks for this and raises.
+
+        Returns
+        -------
+        CSR
+            L, with the same indptr and indices as lower_triangle().
+        """
+        L = self.lower_triangle()
+        for row in range(L.n) :
+            memory = {}
+            start = L.indptr[row]
+            end = L.indptr[row+1]
+            for position in range(start,end,1) :
+                row_sum = 0
+                if row == L.indices[position] : 
+                    for value in memory.values(): 
+                        row_sum += value**2
+                    L.data[position] = np.sqrt(L.data[position] - row_sum)
+                elif row != L.indices[position] : 
+                    j = L.indices[position]
+                    column_sum = 0 
+                    for q in range(L.indptr[j], L.indptr[j+1] - 1) : 
+                        k = L.indices[q]
+                        if k in memory : 
+                            column_sum += memory[k] * L.data[q]
+                    L.data[position] = (1/L.data[L.indptr[L.indices[position]+1]-1]) * (L.data[position] - column_sum)
+                    memory[L.indices[position]] = L.data[position]
+        return L
 
     def forward_solve(self,L,r) : 
+        """Solve L y = r for lower-triangular L, from the top row down.
+ 
+        For each row, y(i) = (r(i) - sum of L(i, k) y(k)) / L(i, i), with
+        the sum over the stored entries before the diagonal. The diagonal
+        must be the last stored entry of each row, as it is for a factor
+        from incomplete_cholesky.
+ 
+        Parameters
+        ----------
+        L : CSR
+            Lower-triangular matrix with a non-zero diagonal.
+        r : ndarray, shape (n,)
+ 
+        Returns
+        -------
+        list of float, length n
+        """
         y = []
         for row in range(L.n) : 
             start = L.indptr[row]
@@ -175,6 +241,16 @@ class CSR :
         return y
     
     def transpose(self) : 
+        """Return the transpose as a new CSR.
+ 
+        CSR gives fast access to rows but not columns. The backward solve
+        needs the columns of L, so L^T is built once and then read by rows.
+ 
+        Returns
+        -------
+        CSR
+            Entry (i, j) of the original becomes entry (j, i).
+        """
         rows = []
         cols = []
         vals = []
@@ -188,6 +264,24 @@ class CSR :
         return CSR(np.asarray(cols),np.asarray(rows),np.asarray(vals),self.n)
               
     def backward_solve(self,L_transposed,y) : 
+        """Solve L^T z = y, from the bottom row up.
+ 
+        Takes L^T itself, built once by the caller with transpose(), not
+        L. L^T is upper-triangular, so the diagonal is the first stored
+        entry of each row. For each row, z(i) = (y(i) - sum of L^T(i, k)
+        z(k)) / L^T(i, i), with the sum over the entries after the diagonal.
+ 
+        Parameters
+        ----------
+        L_transposed : CSR
+            Upper-triangular matrix with a non-zero diagonal.
+        y : array_like, shape (n,)
+            Usually the output of forward_solve.
+ 
+        Returns
+        -------
+        ndarray, shape (n,)
+        """
         z = np.zeros(L_transposed.n)
         for row in range(L_transposed.n-1, -1, -1) : 
             start = L_transposed.indptr[row]
