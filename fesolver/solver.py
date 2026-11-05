@@ -137,6 +137,52 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     return u , history
     
 def partition_csr(K,F,fixed_dofs,fixed_values = None) : 
+    """Reduce a CSR system to its free DOFs, ready for an iterative solve.
+ 
+    The DOFs are split into free (f) and fixed (c), and the reduced system
+ 
+        K_ff u_f = F_f - K_fc u_c
+ 
+    is built without forming any dense matrix. The free DOFs are
+    renumbered 0 to n_free - 1 in increasing order, and each row of K is
+    read once: an entry whose row and column are both free is copied into
+    K_ff under the new numbers, and an entry in a free row but a fixed
+    column is multiplied by the prescribed displacement and moved to the
+    right-hand side. Rows of fixed DOFs are skipped.
+ 
+    K and F are not modified.
+ 
+    Parameters
+    ----------
+    K : CSR
+        Global stiffness matrix from assembly_stiffness_csr.
+    F : ndarray, shape (n,)
+        Global load vector. Entries at fixed DOFs are not used.
+    fixed_dofs : array_like of int
+        Global indices of the constrained DOFs, in any order.
+    fixed_values : array_like of float, optional
+        Prescribed displacement in metres at each fixed DOF, in the same
+        order as fixed_dofs. Defaults to zero at every fixed DOF.
+ 
+    Returns
+    -------
+    K_ff : CSR
+        Reduced stiffness matrix, size n_free.
+    F_rhs : ndarray, shape (n_free,)
+        F_f - K_fc u_c, the right-hand side of the reduced system.
+    free_dofs : ndarray of int, shape (n_free,)
+        Global index of each free DOF, in increasing order; entry i is the
+        global DOF that row i of K_ff belongs to.
+    prescribed : ndarray, shape (n,)
+        Full-length vector holding the prescribed values at the fixed DOFs
+        and zero elsewhere. The free entries are filled in once u_f is known.
+ 
+    Raises
+    ------
+    ValueError
+        If fixed_values and fixed_dofs differ in length.
+    """
+
     if fixed_values is None :
             fixed_values = np.zeros(len(fixed_dofs))
     else : 
