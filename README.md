@@ -3,6 +3,8 @@
 
 `fe-solver` is a 2D plane-stress finite element package written in Python. It is built around the 8-node serendipity quadrilateral (Quad8), with the constant strain triangle (CST) included as a second element. The package covers the full chain of a linear elastic analysis: meshing, stiffness assembly, edge loads, solution, stress recovery, error norms and plotting.
 
+Two solution paths are provided. In the first, the stiffness matrix is stored densely and solved directly. In the second, it is stored in compressed sparse row (CSR) format and solved by the conjugate gradient (CG) method, with an optional Jacobi or incomplete Cholesky (IC(0)) preconditioner. The sparse storage, CG and both preconditioners are written in the package itself; SciPy is used only as a reference in the benchmark.
+
 The package was verified through a mesh convergence study against an exact elasticity solution. The L2 norm measures the error in displacement and the energy norm measures the error in strain. The measured convergence rates were 3.03 in the L2 norm and 2.00 in the energy norm. These match the theoretical rates of 3 and 2 for quadratic elements.
 
 ## Convergence study
@@ -33,6 +35,42 @@ The second example is a lifting lug modelled as a single Quad8 element. Three no
 |:--------------:|:----------------:|
 | ![Deformed shape of the lifting lug](docs/images/lifting_lug_deformed.png) | ![Von Mises stress in the lifting lug](docs/images/lifting_lug_von_mises.png) |
 | *Drawn with a scale factor of 2000.* | *Nodal values, plotted on the undeformed shape.* |
+
+## Sparse solver benchmark
+
+The sparse path was compared against a dense direct solve (NumPy) and a sparse direct solve (SciPy `spsolve`). The cantilever above was used on four Quad8 grids, each with about four times the degrees of freedom of the one before. The left end is held at zero and a point load of 1000 N is applied at the top-right corner. CG stops when the residual has fallen to 1e-8 of its starting value. Every solution agrees with the SciPy solution to a relative error of 2e-11 or less. Times are from a single run on the author's machine and are indicative only.
+
+| Grid     | Free DOFs | Dense (s) | SciPy `spsolve` (s) | CG (s) | CG, Jacobi (s) | CG, IC(0) (s) |
+|----------|-----------|-----------|---------------------|--------|----------------|---------------|
+| 16 x 4   | 448       | 0.0022    | 0.00083             | 0.141  | 0.124          | 0.109         |
+| 32 x 8   | 1,664     | 0.065     | 0.0031              | 1.02   | 0.949          | 0.705         |
+| 64 x 16  | 6,400     | 2.95      | 0.024               | 7.80   | 7.26           | 5.07          |
+| 128 x 32 | 25,088    | not run   | 0.177               | 62.3   | 59.1           | 38.5          |
+
+| Grid     | CG iterations | Jacobi iterations | IC(0) iterations | Dense K<sub>ff</sub> (MB) | CSR K<sub>ff</sub> (MB) |
+|----------|---------------|-------------------|------------------|---------------------------|-------------------------|
+| 16 x 4   | 274           | 240               | 32               | 1.61                      | 0.197                   |
+| 32 x 8   | 538           | 496               | 58               | 22.2                      | 0.786                   |
+| 64 x 16  | 1,070         | 996               | 113              | 328                       | 3.14                    |
+| 128 x 32 | 2,100         | 1,993             | 224              | 5,035                     | 12.5                    |
+
+| Solve time | CG iterations | Storage of K<sub>ff</sub> |
+|:----------:|:-------------:|:-------------------------:|
+| ![Solve time against free DOFs](docs/images/benchmark_time.png) | ![CG iterations against free DOFs](docs/images/benchmark_iterations.png) | ![Storage of K_ff against free DOFs](docs/images/benchmark_memory.png) |
+
+**Storage.** Dense storage grows with the square of the number of unknowns, whereas CSR storage grows in proportion to it. On the largest grid, the dense matrix would need 5.0 GB against 12.5 MB in CSR, so the dense solve was not run.
+
+**Iterations.** The number of CG iterations roughly doubles each time the grid is refined, for all three variants. IC(0) reduces the count by about nine times, but does not change how it grows. Jacobi saves between 5% and 12%, because the diagonal of the stiffness matrix is nearly constant on a uniform mesh.
+
+**Time.** Fewer iterations did not give a proportional saving in time. IC(0) needs about nine times fewer iterations than plain CG, but on the largest grid it is only about 1.6 times faster, because each iteration adds a forward and a backward triangular solve. SciPy's sparse direct solve is about 200 times faster than CG with IC(0) on the largest grid. Its loops run in compiled code, and a sparse direct solve is inexpensive for 2D problems of this size.
+
+**Where the time goes.** Each stage of the IC(0) path was also timed on its own. On the largest grid, the triangular solves take 77% of the solve time, the matrix-vector products 17%, and building the preconditioner 5%. The timed stages add up to within 4% of the measured solve time on every grid. These loops are written in pure Python and are the first candidates for a compiled implementation.
+
+### Choice of preconditioner
+
+IC(0) is incomplete Cholesky with zero fill-in. The factor L keeps exactly the sparsity pattern of the lower triangle of K<sub>ff</sub>, and every stored entry is recomputed, so L L<sup>T</sup> equals K<sub>ff</sub> at every stored position and differs only outside the pattern. A cheaper diagonal-based variant keeps the off-diagonal entries of K unchanged and computes only a new diagonal, but approximates K<sub>ff</sub> less closely. IC(0) was chosen because it is the standard baseline in the literature.
+
+The preconditioner M = L L<sup>T</sup> is never formed. It is applied to a residual by a forward solve with L followed by a backward solve with L<sup>T</sup>. L<sup>T</sup> is built once as its own CSR matrix, because the backward solve needs the columns of L and CSR only gives fast access to rows.
 
 ## Usage
 
@@ -89,6 +127,16 @@ plot_deformed_shape(mesh, u, 1000, Quad8)
 plot_von_mises(mesh, vm, Quad8)
 ```
 
+For the sparse path, the stiffness matrix is assembled in CSR format and passed to `sparse_solve`. The preconditioner is `None`, `"jacobi"` or `"ic0"`, and `history` holds the relative residual after each CG iteration.
+
+```python
+from fesolver.assembly import assembly_stiffness_csr
+from fesolver.solver import sparse_solve
+
+K = assembly_stiffness_csr(mesh, Quad8, steel, THICKNESS)
+u, history = sparse_solve(K, F, fixed_dofs, preconditioner="ic0")
+```
+
 SI units (m, N, Pa) are used throughout the package. The DOF order is `[u1, v1, u2, v2, ...]`.
 
 ## Installation and tests
@@ -98,23 +146,25 @@ Python 3.10 or later is required. The package was developed on Python 3.12.
 ```bash
 git clone https://github.com/yasinghazaly/fe-solver.git
 cd fe-solver
-pip install -e .
-pip install pytest
+pip install -e ".[dev]"
 ```
 
-The test suite contains 61 tests and is run from the repository root:
+The `dev` extra installs pytest and SciPy. SciPy is needed only for the benchmark.
+
+The test suite contains 142 tests and is run from the repository root:
 
 ```bash
 pytest
 ```
 
-Among other checks, the suite confirms that each stiffness matrix has exactly three rigid-body modes.
+Among other checks, the suite confirms that each stiffness matrix has exactly three rigid-body modes, that the sparse assembly and solve reproduce the dense ones, and that CG with each preconditioner reaches the direct solution.
 
-The two examples are also run from the repository root:
+The examples are also run from the repository root. The benchmark takes a few minutes, mostly on the largest grid.
 
 ```bash
 python examples/cantilever_convergence.py
 python examples/lifting_lug.py
+python examples/benchmark.py
 ```
 
 ## Folder layout
@@ -128,13 +178,16 @@ fe-solver/
 │   └── theory.md        derivation of the method
 ├── examples/
 │   ├── cantilever_convergence.py   h-refinement study against the exact solution
-│   └── lifting_lug.py              single Quad8 lug, self-verifying
+│   ├── lifting_lug.py              single Quad8 lug, self-verifying
+│   └── benchmark.py                dense, sparse direct and CG solves against problem size
 ├── fesolver/
 │   ├── materials.py     PlaneStressMaterial
 │   ├── quadrature.py    Gauss rules in 1D and 2D
 │   ├── mesh.py          Mesh class and structured_quad8
-│   ├── assembly.py      global stiffness assembly
-│   ├── solver.py        solution with prescribed displacements
+│   ├── assembly.py      global stiffness assembly, dense and CSR
+│   ├── sparse.py        CSR matrix, IC(0) factorisation and triangular solves
+│   ├── iterative.py     conjugate gradients with Jacobi and IC(0)
+│   ├── solver.py        dense and sparse solution with prescribed displacements
 │   ├── loads.py         consistent edge tractions
 │   ├── errors.py        L2 and energy error norms
 │   ├── postprocess.py   stress recovery, von Mises and plots
@@ -142,14 +195,14 @@ fe-solver/
 │       ├── base.py      abstract element base class
 │       ├── quad8.py     8-node serendipity quadrilateral
 │       └── cst.py       constant strain triangle
-└── tests/               61 tests
+└── tests/               142 tests
 ```
 
 Library code is kept in `fesolver/`, whereas problem-specific scripts are kept in `examples/`.
 
 ## Theory
 
-The Quad8 is an isoparametric element, where the geometry and the displacement are described using the same set of quadratic shape functions. The element stiffness matrix is evaluated through Gauss numerical integration with a 3 x 3 rule. Boundary conditions are applied by partitioning the global system, which allows non-zero displacements to be prescribed. Stresses are computed at the Gauss points, extrapolated to the element nodes with a least-squares fit, and then averaged at the nodes shared between elements. The error norms are integrated with a higher-order rule than the element itself. For quadratic elements, the L2 error is expected to fall as h<sup>3</sup> and the energy error as h<sup>2</sup>.
+The Quad8 is an isoparametric element, where the geometry and the displacement are described using the same set of quadratic shape functions. The element stiffness matrix is evaluated through Gauss numerical integration with a 3 x 3 rule. Boundary conditions are applied by partitioning the global system, which allows non-zero displacements to be prescribed. On the sparse path the reduced system is symmetric positive definite, so it is solved by conjugate gradients. Stresses are computed at the Gauss points, extrapolated to the element nodes with a least-squares fit, and then averaged at the nodes shared between elements. The error norms are integrated with a higher-order rule than the element itself. For quadratic elements, the L2 error is expected to fall as h<sup>3</sup> and the energy error as h<sup>2</sup>.
 
 The full derivation is given in [docs/theory.md](docs/theory.md).
 
@@ -157,7 +210,11 @@ The full derivation is given in [docs/theory.md](docs/theory.md).
 
 - The analysis is 2D plane stress only: linear elastic, isotropic and small strain.
 - Only the Quad8 and CST elements are available, with one element type per mesh.
-- The stiffness matrix is dense and the system is solved directly.
+- The sparse path is written in pure Python and is much slower than SciPy's compiled solvers (see the benchmark).
+- The sparse path does not check for rigid-body modes. An under-constrained model is not detected: CG does not converge and a warning is raised.
+- IC(0) can break down for some symmetric positive definite matrices. A breakdown is detected and reported, but no diagonal shift is applied.
+- The nodes are not reordered before the IC(0) factorisation.
+- The dense path checks for rigid-body modes with a full eigenvalue decomposition, which dominates its cost above a few thousand DOFs.
 - The mesh generator covers structured rectangular Quad8 grids only. There is no mesh import.
 - Edge tractions are implemented for Quad8 edges only.
 - Point loads are applied by writing directly into the force vector.
