@@ -9,7 +9,7 @@ dependencies = ["numpy" , "matplotlib"]
 dev = ["pytest", "scipy"]
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61" , "pybind11"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

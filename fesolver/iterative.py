@@ -1,8 +1,9 @@
 """Preconditioned conjugate gradient solver for sparse symmetric systems."""
 import numpy as np 
 import warnings
+from fesolver import _kernels
 
-def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :  
+def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None,backend = "python") :  
     """Solve K x = b by the preconditioned conjugate gradient method.
  
     K must be symmetric positive definite, as the reduced stiffness matrix
@@ -31,6 +32,12 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
         Target relative residual. Defaults to 1e-8.
     max_iter : int, optional
         Largest number of iterations. Defaults to 10 * n.
+    backend : {"python", "cpp"}, optional
+        Which kernels run the matrix-vector products and the IC(0)
+        triangular solves: the pure-Python CSR methods or the compiled
+        C++ versions in fesolver._kernels. Both do the same arithmetic,
+        so the iterations and history agree; only the run time differs.
+        Defaults to "python".
  
     Returns
     -------
@@ -48,6 +55,8 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
         length or any entry that is zero, negative or NaN; for "ic0", if
         the factorisation breaks down (a zero, negative or NaN diagonal
         entry of L).
+        
+        If backend is not "python" or "cpp"; if b is all zeros; ...
  
     Warns
     -----
@@ -55,6 +64,15 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
         If max_iter is reached and the final relative residual is still
         above tol.
     """
+    if backend == "python" : 
+        matvec = K.matvec
+    elif backend == "cpp" :     
+        matvec = lambda d : _kernels.matvec(K.indptr, K.indices, K.data, d)
+    else : 
+        raise ValueError(
+            f"Unknown backend {backend!r}. Use 'python' for the pure-Python "
+            f"kernels or 'cpp' for the compiled C++ kernels in fesolver._kernels.")  
+        
     if x0 is None : 
         x0 = np.zeros(len(b))
     if max_iter is None : 
@@ -109,21 +127,21 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
         raise ValueError(
             f"Right-hand side b is all zeros, so the relative residual is undefined. "
             f"Check that the reduced load vector is not empty.")
-        
+                
     x = x0.copy()
-    r = b - K.matvec(x0)
-    z = apply_preconditioner(L,L_transposed,r,M_inv,preconditioner)
+    r = b - matvec(x0)
+    z = apply_preconditioner(L,L_transposed,r,M_inv,preconditioner, backend=backend)
     d = z.copy()
     
     relative_residual_norm = (np.linalg.norm(r) / b_norm)
     history = [relative_residual_norm]
     iterations = 0 
     while  relative_residual_norm > tol and iterations < max_iter : 
-        K_d = K.matvec(d)
+        K_d = matvec(d)
         alpha = (r.T @ z) / (d.T @ K_d)
         x = x + (alpha * d)
         r_new = r - (alpha * K_d)
-        z_new = apply_preconditioner(L,L_transposed,r_new,M_inv,preconditioner)
+        z_new = apply_preconditioner(L,L_transposed,r_new,M_inv,preconditioner,backend = backend)
         beta = (r_new.T @ z_new) / (r.T @ z)
         r = r_new
         z = z_new
@@ -140,7 +158,7 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None) :
         
     return x, np.array(history)
 
-def apply_preconditioner(L,L_transposed, r, M_inv, preconditioner = None) : 
+def apply_preconditioner(L,L_transposed, r, M_inv, preconditioner = None, backend = "python") : 
     """Apply the preconditioner to a residual: return z = M^-1 r.
  
     Called once per CG iteration. Everything expensive (L, L^T and M_inv)
@@ -156,6 +174,8 @@ def apply_preconditioner(L,L_transposed, r, M_inv, preconditioner = None) :
         Reciprocal of the diagonal of K. Used only for "jacobi".
     preconditioner : {None, "jacobi", "ic0"}, optional
         Defaults to None.
+    backend : {"python", "cpp"}, optional
+        Kernels for the "ic0" triangular solves. Defaults to "python".
  
     Returns
     -------
@@ -166,8 +186,16 @@ def apply_preconditioner(L,L_transposed, r, M_inv, preconditioner = None) :
     if preconditioner == "jacobi" : 
         z = M_inv * r
     elif preconditioner == "ic0" : 
-        y = L.forward_solve(L,r)
-        z = L.backward_solve(L_transposed,y)
+        if backend == "python" : 
+            y = L.forward_solve(L,r)
+            z = L.backward_solve(L_transposed,y)
+        elif backend == "cpp" : 
+            y = _kernels.forward_solve(L.indptr,L.indices,L.data,r)
+            z = _kernels.backward_solve(L_transposed.indptr,L_transposed.indices,L_transposed.data,y)
+        else : 
+            raise ValueError(
+                f"Unknown backend {backend!r}. Use 'python' for the pure-Python "
+                f"kernels or 'cpp' for the compiled C++ kernels in fesolver._kernels.")   
     else : 
         z = r  
     return z

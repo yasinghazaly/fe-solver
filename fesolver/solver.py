@@ -72,7 +72,7 @@ def solve(K,F,fixed_dofs , fixed_values = None) :
     u[fixed_dofs] = fixed_values
     return u
     
-def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) : 
+def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None, backend = "python") : 
     """Solve the constrained system K u = F with K stored as CSR.
 
     Constraints are applied by partitioning, as in solve. The DOFs are
@@ -108,6 +108,9 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     preconditioner : {None, "jacobi", "ic0"}, optional
         Preconditioner for cg. None gives plain CG; "ic0" usually needs
         far fewer iterations than "jacobi". Defaults to None.
+    backend : {"python", "cpp"}, optional
+        Passed to cg: "cpp" runs the matrix-vector products and the
+        IC(0) triangular solves in compiled C++. Defaults to "python".
 
     Returns
     -------
@@ -121,16 +124,13 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None ) :
     Raises
     ------
     ValueError
-        If fixed_values and fixed_dofs differ in length.
-        Raises
-    ValueError
         If fixed_values and fixed_dofs differ in length, or if cg rejects
         its inputs: an all-zero reduced load, a Jacobi diagonal with zero,
         negative or NaN entries, or an IC(0) breakdown.
 
     """
     K_ff , F_rhs , free_dofs, prescribed = partition_csr(K,F,fixed_dofs, fixed_values)
-    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner)
+    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner, backend = "python")
     for index,value in enumerate(free_dofs) : 
         prescribed[value] = u_f[index]
     u = prescribed
