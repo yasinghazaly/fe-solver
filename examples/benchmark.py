@@ -6,14 +6,20 @@ system K_ff u = F_rhs is solved by
 
 - a dense direct solve (NumPy), skipped once K_ff is too large to store densely,
 - a sparse direct solve (SciPy spsolve), used as the reference answer,
-- conjugate gradients with no preconditioner, Jacobi and IC(0).
+- conjugate gradients with no preconditioner, Jacobi and IC(0), each run
+  twice: with the pure-Python kernels and with the C++ kernels
+  (backend="cpp"), which replace the matrix-vector product and the IC(0)
+  triangular solves.
 
 Solve time, CG iterations, storage of K_ff and the error of each answer
 against the reference are recorded. A second pass times each stage of the
-IC(0) path on its own, and checks that the stages add up to the measured
-IC(0) solve time.
+IC(0) path on its own, including one matvec and one forward plus backward
+solve in each backend, and checks for both backends that the stages add
+up to the measured IC(0) solve time.
 
-A table is printed and three log-log plots are saved to docs/images/.
+Three tables are printed (Python backend, C++ backend with its speed-up
+and its gap to SciPy, stage breakdown) and three log-log plots are saved
+to docs/images/.
 The largest grid takes a few minutes; run from any directory with
 
     python examples/benchmark.py
@@ -26,6 +32,7 @@ import numpy as np
 from scipy.sparse import csr_array
 from scipy.sparse.linalg import spsolve
 
+from fesolver import _kernels
 from fesolver.assembly import assemble_triplets
 from fesolver.elements.quad8 import Quad8
 from fesolver.iterative import cg
@@ -41,6 +48,8 @@ LOAD = -1000.0
 DENSE_LIMIT = 10_000   # largest K_ff solved densely (10,000 DOFs is 0.8 GB)
 REPEATS = 10           # calls averaged when timing one matvec or one solve
 IMAGES = Path(__file__).resolve().parent.parent / "docs" / "images"
+CG_RUNS = [('No Preconditioner', None), ('Jacobi', 'jacobi'), ('IC(0)', 'ic0')]
+BACKENDS = [('', 'python'), (' C++', 'cpp')]   # key suffix, backend name
 
 
 def loads_and_supports(mesh):
@@ -93,10 +102,11 @@ def compare_solvers(nx, ny):
     -------
     dict
         Grid name, total and free DOFs; for each solver its time, and for
-        dense and the three CG runs their error against SciPy; CG iteration
-        counts; storage of K_ff in MB, dense and CSR. Dense time and error
-        are None above DENSE_LIMIT free DOFs, where the dense solve is
-        skipped. Dense storage is always computed.
+        dense and the six CG runs their error against SciPy; CG iteration
+        counts; storage of K_ff in MB, dense and CSR. Keys of the C++ runs
+        end in ' C++' before the quantity, e.g. 'IC(0) C++ Time'. Dense time
+        and error are None above DENSE_LIMIT free DOFs, where the dense solve
+        is skipped. Dense storage is always computed.
     """
     mesh = structured_quad8(LENGTH, HEIGHT, nx, ny)
     rows, cols, vals = assemble_triplets(mesh, Quad8, STEEL, THICKNESS)
@@ -127,13 +137,13 @@ def compare_solvers(nx, ny):
         result['Dense Time'] = None
         result['Dense Error'] = None
 
-    for name, preconditioner in [('No Preconditioner', None),
-                                 ('Jacobi', 'jacobi'),
-                                 ('IC(0)', 'ic0')]:
-        (u, history), result[f'{name} Time'] = timed(
-            lambda: cg(K_ff, F_rhs, preconditioner=preconditioner))
-        result[f'{name} Iterations'] = len(history) - 1
-        result[f'{name} Error'] = relative_error(u, u_reference)
+    for name, preconditioner in CG_RUNS:
+        for suffix, backend in BACKENDS:
+            key = f'{name}{suffix}'
+            (u, history), result[f'{key} Time'] = timed(
+                lambda: cg(K_ff, F_rhs, preconditioner=preconditioner, backend=backend))
+            result[f'{key} Iterations'] = len(history) - 1
+            result[f'{key} Error'] = relative_error(u, u_reference)
 
     return result
 
@@ -145,7 +155,8 @@ def stage_breakdown(nx, ny):
     IC(0) factorisation, transpose) are timed once. Stages that run once
     per CG iteration (one matvec, one forward plus backward solve) are
     averaged over REPEATS calls, because a single call is too short to time
-    reliably. The input vector is all ones: the cost depends on the
+    reliably, and are timed for both the Python and the C++ kernels on the
+    same arrays. The input vector is all ones: the cost depends on the
     sparsity pattern, not on the values.
 
     Parameters
@@ -156,7 +167,9 @@ def stage_breakdown(nx, ny):
     Returns
     -------
     dict
-        Grid name and the time of each stage in seconds.
+        Grid name and the time of each stage in seconds. 'Matvec' and
+        'Solve' are the Python kernels, 'C++ Matvec' and 'C++ Solve' the
+        C++ ones.
     """
     mesh = structured_quad8(LENGTH, HEIGHT, nx, ny)
     F, fixed_dofs = loads_and_supports(mesh)
@@ -180,65 +193,107 @@ def stage_breakdown(nx, ny):
         L.backward_solve(L_transposed, L.forward_solve(L, x))
     stages['Solve'] = (time.perf_counter() - start) / REPEATS
 
+    start = time.perf_counter()
+    for _ in range(REPEATS):
+        _kernels.matvec(K_ff.indptr, K_ff.indices, K_ff.data, x)
+    stages['C++ Matvec'] = (time.perf_counter() - start) / REPEATS
+
+    start = time.perf_counter()
+    for _ in range(REPEATS):
+        y = _kernels.forward_solve(L.indptr, L.indices, L.data, x)
+        _kernels.backward_solve(L_transposed.indptr, L_transposed.indices,
+                                L_transposed.data, y)
+    stages['C++ Solve'] = (time.perf_counter() - start) / REPEATS
+
     return stages
 
 
 def check_breakdown(stages, result, rtol=0.2):
-    """Check that the timed stages add up to the measured IC(0) solve time.
+    """Check that the timed stages add up to the measured IC(0) solve times.
 
     The predicted time is the one-off setup (factorisation and transpose)
     plus the number of iterations times the cost of one iteration (one
-    matvec and one forward plus backward solve). The vector updates and
-    dot products inside CG are not timed, so the prediction runs slightly
-    low on small grids.
+    matvec and one forward plus backward solve). It is formed twice, once
+    with the Python per-call times and the Python iteration count, and once
+    with the C++ ones. The vector updates and dot products inside CG are
+    not timed, so the prediction runs slightly low on small grids.
 
     Parameters
     ----------
     stages : dict
         Output of stage_breakdown for one grid. Updated in place with
         'Predicted', 'Ratio' (predicted / measured) and 'Check' ('ok' if
-        within rtol of the measured time, otherwise 're-run').
+        within rtol of the measured time, otherwise 're-run'), and the
+        same three keys prefixed with 'C++ ' for the C++ path.
     result : dict
         Output of compare_solvers for the same grid.
     rtol : float, optional
         Relative tolerance. Defaults to 0.2.
     """
-    measured = result['IC(0) Time']
-    predicted = (stages['IC(0) Factorisation'] + stages['Transpose']
-                 + result['IC(0) Iterations'] * (stages['Matvec'] + stages['Solve']))
-    stages['Predicted'] = predicted
-    stages['Ratio'] = predicted / measured
-    stages['Check'] = 'ok' if np.isclose(measured, predicted, rtol=rtol) else 're-run'
+    setup = stages['IC(0) Factorisation'] + stages['Transpose']
+    for prefix, suffix in [('', ''), ('C++ ', ' C++')]:
+        measured = result[f'IC(0){suffix} Time']
+        per_iteration = stages[f'{prefix}Matvec'] + stages[f'{prefix}Solve']
+        predicted = setup + result[f'IC(0){suffix} Iterations'] * per_iteration
+        stages[f'{prefix}Predicted'] = predicted
+        stages[f'{prefix}Ratio'] = predicted / measured
+        stages[f'{prefix}Check'] = 'ok' if np.isclose(measured, predicted, rtol=rtol) else 're-run'
 
 
 def print_tables(results, breakdowns):
-    """Print the solver comparison and the stage breakdown, one row per grid."""
+    """Print the solver comparison and the stage breakdown, one row per grid.
+
+    Three tables: the Python backend with the direct solvers and storage;
+    the C++ backend with the speed-up of its IC(0) solve over the Python
+    one and its gap to SciPy (C++ IC(0) time / SciPy time); and the stage
+    breakdown with per-call kernel speed-ups and both stage checks.
+    """
     def fmt(value):
         return '-' if value is None else f'{value:.3g}'
 
-    print('\nSolve time (s), CG iterations in brackets, storage of K_ff (MB)')
+    def cg_cols(r, suffix):
+        return [f"{fmt(r[f'{name}{suffix} Time'])} ({r[f'{name}{suffix} Iterations']})"
+                for name, _ in CG_RUNS]
+
+    print('\nPython backend: solve time (s), CG iterations in brackets, storage of K_ff (MB)')
     print(f"{'Grid':>7} {'Free DOFs':>9} {'Dense':>8} {'SciPy':>8} "
           f"{'CG':>13} {'Jacobi':>13} {'IC(0)':>13} {'Dense MB':>9} {'CSR MB':>7}")
     for r in results:
-        cg_cols = [f"{fmt(r[f'{k} Time'])} ({r[f'{k} Iterations']})"
-                   for k in ('No Preconditioner', 'Jacobi', 'IC(0)')]
+        cols = cg_cols(r, '')
         print(f"{r['Grid']:>7} {r['Free DOFs']:>9} {fmt(r['Dense Time']):>8} "
-              f"{fmt(r['SciPy Time']):>8} {cg_cols[0]:>13} {cg_cols[1]:>13} "
-              f"{cg_cols[2]:>13} {fmt(r['Dense Memory']):>9} {fmt(r['CSR Memory']):>7}")
+              f"{fmt(r['SciPy Time']):>8} {cols[0]:>13} {cols[1]:>13} "
+              f"{cols[2]:>13} {fmt(r['Dense Memory']):>9} {fmt(r['CSR Memory']):>7}")
 
-    worst = max(r[f'{k} Error'] for r in results
-                for k in ('No Preconditioner', 'Jacobi', 'IC(0)', 'Dense')
+    print('\nC++ backend: solve time (s), CG iterations in brackets')
+    print(f"{'Grid':>7} {'Free DOFs':>9} {'CG':>13} {'Jacobi':>13} {'IC(0)':>13} "
+          f"{'IC(0) speed-up':>14} {'Gap to SciPy':>12}")
+    for r in results:
+        cols = cg_cols(r, ' C++')
+        speed_up = r['IC(0) Time'] / r['IC(0) C++ Time']
+        gap = r['IC(0) C++ Time'] / r['SciPy Time']
+        print(f"{r['Grid']:>7} {r['Free DOFs']:>9} {cols[0]:>13} {cols[1]:>13} "
+              f"{cols[2]:>13} {speed_up:>13.1f}x {gap:>11.0f}x")
+
+    error_keys = ['Dense'] + [f'{name}{suffix}' for name, _ in CG_RUNS
+                              for suffix, _ in BACKENDS]
+    worst = max(r[f'{k} Error'] for r in results for k in error_keys
                 if r[f'{k} Error'] is not None)
     print(f'Largest relative error against SciPy spsolve: {worst:.1e}')
 
     keys = ['Element Loop', 'CSR Build', 'Partitioning', 'IC(0) Factorisation',
-            'Transpose', 'Matvec', 'Solve']
+            'Transpose', 'Matvec', 'C++ Matvec', 'Solve', 'C++ Solve']
     print('\nStage breakdown (s); Matvec and Solve are per call')
-    print(f"{'Grid':>7} " + ' '.join(f'{k:>{max(len(k), 8)}}' for k in keys)
-          + f" {'Predicted':>9} {'Ratio':>6} {'Check':>6}")
+    print(f"{'Grid':>7} " + ' '.join(f'{k:>{max(len(k), 8)}}' for k in keys))
     for s in breakdowns:
-        print(f"{s['Grid']:>7} " + ' '.join(f'{fmt(s[k]):>{max(len(k), 8)}}' for k in keys)
-              + f" {fmt(s['Predicted']):>9} {s['Ratio']:>6.2f} {s['Check']:>6}")
+        print(f"{s['Grid']:>7} " + ' '.join(f'{fmt(s[k]):>{max(len(k), 8)}}' for k in keys))
+
+    print('\nKernel speed-up per call (Python / C++) and stage check (predicted / measured IC(0) time)')
+    print(f"{'Grid':>7} {'Matvec':>8} {'Solve':>8} {'Python ratio':>12} {'Check':>6} "
+          f"{'C++ ratio':>9} {'Check':>6}")
+    for s in breakdowns:
+        print(f"{s['Grid']:>7} {s['Matvec'] / s['C++ Matvec']:>7.0f}x "
+              f"{s['Solve'] / s['C++ Solve']:>7.0f}x {s['Ratio']:>12.2f} {s['Check']:>6} "
+              f"{s['C++ Ratio']:>9.2f} {s['C++ Check']:>6}")
 
 
 def plot_lines(x, series, ylabel, title, filename):
@@ -277,6 +332,7 @@ def plot_results(results):
                    ('CG, no preconditioner', column('No Preconditioner Time')),
                    ('CG, Jacobi', column('Jacobi Time')),
                    ('CG, IC(0)', column('IC(0) Time')),
+                   ('CG, IC(0), C++ kernels', column('IC(0) C++ Time')),
                    ('Sparse direct (SciPy spsolve)', column('SciPy Time'))],
                'Solve time (s)', 'Solve time against problem size',
                'benchmark_time.png')
