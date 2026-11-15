@@ -3,7 +3,7 @@
 
 `fe-solver` is a 2D plane-stress finite element package written in Python. It is built around the 8-node serendipity quadrilateral (Quad8), with the constant strain triangle (CST) included as a second element. The package covers the full chain of a linear elastic analysis: meshing, stiffness assembly, edge loads, solution, stress recovery, error norms and plotting.
 
-Two solution paths are provided. In the first, the stiffness matrix is stored densely and solved directly. In the second, it is stored in compressed sparse row (CSR) format and solved by the conjugate gradient (CG) method, with an optional Jacobi or incomplete Cholesky (IC(0)) preconditioner. The sparse storage, CG and both preconditioners are written in the package itself; SciPy is used only as a reference in the benchmark.
+Two solution paths are provided. In the first, the stiffness matrix is stored densely and solved directly. In the second, it is stored in compressed sparse row (CSR) format and solved by the conjugate gradient (CG) method, with an optional Jacobi or incomplete Cholesky (IC(0)) preconditioner. The sparse storage, CG and both preconditioners are written in the package itself; SciPy is used only as a reference in the benchmark. The matrix-vector product and the two triangular solves of IC(0), which take most of the solve time, also have C++ implementations that are called from Python through pybind11.
 
 The package was verified through a mesh convergence study against an exact elasticity solution. The L2 norm measures the error in displacement and the energy norm measures the error in strain. The measured convergence rates were 3.03 in the L2 norm and 2.00 in the energy norm. These match the theoretical rates of 3 and 2 for quadratic elements.
 
@@ -38,14 +38,14 @@ The second example is a lifting lug modelled as a single Quad8 element. Three no
 
 ## Sparse solver benchmark
 
-The sparse path was compared against a dense direct solve (NumPy) and a sparse direct solve (SciPy `spsolve`). The cantilever above was used on four Quad8 grids, each with about four times the degrees of freedom of the one before. The left end is held at zero and a point load of 1000 N is applied at the top-right corner. CG stops when the residual has fallen to 1e-8 of its starting value. Every solution agrees with the SciPy solution to a relative error of 2e-11 or less. Times are from a single run on the author's machine and are indicative only.
+The sparse path was compared against a dense direct solve (NumPy) and a sparse direct solve (SciPy `spsolve`). The cantilever above was used on four Quad8 grids, each with about four times the degrees of freedom of the one before. The left end is held at zero and a point load of 1000 N is applied at the top-right corner. CG stops when the residual has fallen to 1e-8 of its starting value. Every solution agrees with the SciPy solution to a relative error of 2e-11 or less. Times are from one run on the author's machine and are indicative only. The times below use the pure-Python kernels; the C++ kernels are compared in the next section.
 
 | Grid     | Free DOFs | Dense (s) | SciPy `spsolve` (s) | CG (s) | CG, Jacobi (s) | CG, IC(0) (s) |
 |----------|-----------|-----------|---------------------|--------|----------------|---------------|
-| 16 x 4   | 448       | 0.0022    | 0.00083             | 0.141  | 0.124          | 0.109         |
-| 32 x 8   | 1,664     | 0.065     | 0.0031              | 1.02   | 0.949          | 0.705         |
-| 64 x 16  | 6,400     | 2.95      | 0.024               | 7.80   | 7.26           | 5.07          |
-| 128 x 32 | 25,088    | not run   | 0.177               | 62.3   | 59.1           | 38.5          |
+| 16 x 4   | 448       | 0.0021    | 0.00075             | 0.140  | 0.125          | 0.112         |
+| 32 x 8   | 1,664     | 0.065     | 0.0029              | 1.01   | 0.931          | 0.697         |
+| 64 x 16  | 6,400     | 2.93      | 0.024               | 7.67   | 7.17           | 5.00          |
+| 128 x 32 | 25,088    | not run   | 0.178               | 61.6   | 58.6           | 38.3          |
 
 | Grid     | CG iterations | Jacobi iterations | IC(0) iterations | Dense K<sub>ff</sub> (MB) | CSR K<sub>ff</sub> (MB) |
 |----------|---------------|-------------------|------------------|---------------------------|-------------------------|
@@ -64,13 +64,43 @@ The sparse path was compared against a dense direct solve (NumPy) and a sparse d
 
 **Time.** Fewer iterations did not give a proportional saving in time. IC(0) needs about nine times fewer iterations than plain CG, but on the largest grid it is only about 1.6 times faster, because each iteration adds a forward and a backward triangular solve. SciPy's sparse direct solve is about 200 times faster than CG with IC(0) on the largest grid. Its loops run in compiled code, and a sparse direct solve is inexpensive for 2D problems of this size.
 
-**Where the time goes.** Each stage of the IC(0) path was also timed on its own. On the largest grid, the triangular solves take 77% of the solve time, the matrix-vector products 17%, and building the preconditioner 5%. The timed stages add up to within 4% of the measured solve time on every grid. These loops are written in pure Python and are the first candidates for a compiled implementation.
+**Where the time goes.** Each stage of the IC(0) path was also timed on its own. On the largest grid, the triangular solves take 77% of the solve time, the matrix-vector products 17%, and building the preconditioner 5%. The timed stages add up to within 4% of the measured solve time on every grid. These loops are written in pure Python, so they were the first to be moved to compiled code.
 
 ### Choice of preconditioner
 
 IC(0) is incomplete Cholesky with zero fill-in. The factor L keeps exactly the sparsity pattern of the lower triangle of K<sub>ff</sub>, and every stored entry is recomputed, so L L<sup>T</sup> equals K<sub>ff</sub> at every stored position and differs only outside the pattern. A cheaper diagonal-based variant keeps the off-diagonal entries of K unchanged and computes only a new diagonal, but approximates K<sub>ff</sub> less closely. IC(0) was chosen because it is the standard baseline in the literature.
 
 The preconditioner M = L L<sup>T</sup> is never formed. It is applied to a residual by a forward solve with L followed by a backward solve with L<sup>T</sup>. L<sup>T</sup> is built once as its own CSR matrix, because the backward solve needs the columns of L and CSR only gives fast access to rows.
+
+## C++ kernels
+
+The three loops that run in every CG iteration are also written in C++ (`cpp/kernels.cpp`): the CSR matrix-vector product and the forward and backward triangular solves of IC(0). They are compiled into the module `fesolver._kernels` with pybind11 (`cpp/bindings.cpp`). Each kernel receives the addresses of the NumPy arrays that already hold the CSR matrix and the vector, so no data is copied when Python calls it, and the result is returned as a new NumPy array. The CSR arrays are stored as 64-bit integers and 64-bit floats, which are the types the kernels read; any other type would be converted first, which costs a copy on every call.
+
+The kernels are selected with `backend="cpp"` in `cg` and `sparse_solve`. The default is `backend="python"`, and the Python versions are kept as a readable reference: the tests check the two against each other. The same benchmark was run with both backends on the same grids. The table below is from the second of two runs; on the largest grid the first run was disturbed by other work on the machine, which the stage check flagged.
+
+| Grid     | Free DOFs | CG (s) | CG, Jacobi (s) | CG, IC(0) (s) | IC(0) speed-up over Python | IC(0) time / SciPy time |
+|----------|-----------|--------|----------------|---------------|----------------------------|-------------------------|
+| 16 x 4   | 448       | 0.0034 | 0.0041         | 0.027         | 4.2x                       | 35                      |
+| 32 x 8   | 1,664     | 0.012  | 0.016          | 0.109         | 6.4x                       | 37                      |
+| 64 x 16  | 6,400     | 0.073  | 0.087          | 0.486         | 10.3x                      | 21                      |
+| 128 x 32 | 25,088    | 1.51   | 1.52           | 2.26          | 16.9x                      | 13                      |
+
+| Grid     | Matvec, Python (s) | Matvec, C++ (s) | Speed-up | Forward + backward, Python (s) | Forward + backward, C++ (s) | Speed-up |
+|----------|--------------------|-----------------|----------|--------------------------------|-----------------------------|----------|
+| 16 x 4   | 5.2e-4             | 6.3e-6          | 82x      | 2.1e-3                         | 1.1e-5                      | 194x     |
+| 32 x 8   | 1.9e-3             | 1.5e-5          | 122x     | 8.1e-3                         | 3.6e-5                      | 225x     |
+| 64 x 16  | 7.2e-3             | 5.9e-5          | 121x     | 3.3e-2                         | 1.4e-4                      | 232x     |
+| 128 x 32 | 2.8e-2             | 2.6e-4          | 108x     | 1.3e-1                         | 5.8e-4                      | 229x     |
+
+**Kernels.** Per call, the matrix-vector product is about 100 times faster in C++ and the pair of triangular solves about 200 times faster.
+
+**Whole solve.** CG with IC(0) is 16.9 times faster on the largest grid. The speed-up grows with the grid, because the one-off cost of building the preconditioner is a smaller share of the time on larger problems. The limit can be estimated before the run from the stage breakdown above: about 6% of the Python solve time was spent outside the two kernels, mostly on building the preconditioner. Even if the kernels took no time at all, the solve could then be at most about 1 / 0.06 ≈ 17 times faster (Amdahl's law). The measured 16.9 times is at that limit.
+
+**Where the time goes now.** On the largest grid, the IC(0) factorisation and the transpose, both still in Python, take 1.93 s of the 2.26 s. The 224 iterations of C++ kernels take about 0.19 s. As a result, plain CG (1.51 s) is now faster than CG with IC(0), which is the reverse of the pure-Python result. The factorisation is the next candidate for C++.
+
+**Against SciPy.** SciPy's sparse direct solve is still faster, by a factor of 13 on the largest grid, against about 215 with the pure-Python kernels.
+
+**Agreement.** The C++ triangular solves give bit-identical results to the Python ones. The C++ matrix-vector product adds the terms of each row in order, whereas NumPy's dot product may add them in a different order, so single products can differ by about 1e-16. Over hundreds of CG iterations such differences can move the stopping point by one iteration; in this benchmark the iteration counts were identical on every grid, and every solution agrees with SciPy to 2e-11 or better.
 
 ## Usage
 
@@ -135,13 +165,16 @@ from fesolver.solver import sparse_solve
 
 K = assembly_stiffness_csr(mesh, Quad8, steel, THICKNESS)
 u, history = sparse_solve(K, F, fixed_dofs, preconditioner="ic0")
+
+# Same solve with the C++ kernels
+u, history = sparse_solve(K, F, fixed_dofs, preconditioner="ic0", backend="cpp")
 ```
 
 SI units (m, N, Pa) are used throughout the package. The DOF order is `[u1, v1, u2, v2, ...]`.
 
 ## Installation and tests
 
-Python 3.10 or later is required. The package was developed on Python 3.12.
+Python 3.10 or later is required. The package was developed on Python 3.12. A C++17 compiler is also needed, because the C++ kernels are compiled during installation: on Windows, the Microsoft C++ Build Tools ("Desktop development with C++"); on Linux, g++; on macOS, the Xcode command-line tools. pybind11 is fetched automatically.
 
 ```bash
 git clone https://github.com/yasinghazaly/fe-solver.git
@@ -149,15 +182,23 @@ cd fe-solver
 pip install -e ".[dev]"
 ```
 
-The `dev` extra installs pytest and SciPy. SciPy is needed only for the benchmark.
+The `dev` extra installs pytest and SciPy. SciPy is needed only for the benchmark. After any change to the C++ files, run `pip install -e .` again: an editable install picks up Python changes automatically, but the C++ must be recompiled.
 
-The test suite contains 142 tests and is run from the repository root:
+The kernels can also be checked on their own, without Python, on three hand-worked 3 x 3 examples (expected output `2 1 2`, `2 7 23` and `1.1 -0.2 0.4`). With MinGW g++ under Git Bash on Windows, add `-static`, so that the program does not pick up a mismatched C++ runtime:
+
+```bash
+cd cpp
+g++ -O2 -Wall -Wextra -std=c++17 kernels.cpp test_kernels.cpp -o test_kernels
+./test_kernels
+```
+
+The test suite contains 165 tests and is run from the repository root:
 
 ```bash
 pytest
 ```
 
-Among other checks, the suite confirms that each stiffness matrix has exactly three rigid-body modes, that the sparse assembly and solve reproduce the dense ones, and that CG with each preconditioner reaches the direct solution.
+Among other checks, the suite confirms that each stiffness matrix has exactly three rigid-body modes, that the sparse assembly and solve reproduce the dense ones, that CG with each preconditioner reaches the direct solution, and that the C++ kernels and backend give the same results as the Python ones.
 
 The examples are also run from the repository root. The benchmark takes a few minutes, mostly on the largest grid.
 
@@ -172,21 +213,27 @@ python examples/benchmark.py
 ```
 fe-solver/
 ├── pyproject.toml
+├── setup.py             builds the C++ module fesolver._kernels
 ├── README.md
+├── cpp/
+│   ├── kernels.hpp      declarations of the three kernels
+│   ├── kernels.cpp      CSR matvec and the forward and backward triangular solves
+│   ├── bindings.cpp     pybind11 wrappers taking and returning NumPy arrays
+│   └── test_kernels.cpp standalone check on hand-worked examples
 ├── docs/
 │   ├── images/          figures used in this README
 │   └── theory.md        derivation of the method
 ├── examples/
 │   ├── cantilever_convergence.py   h-refinement study against the exact solution
 │   ├── lifting_lug.py              single Quad8 lug, self-verifying
-│   └── benchmark.py                dense, sparse direct and CG solves against problem size
+│   └── benchmark.py                dense, sparse direct and CG solves (Python and C++) against problem size
 ├── fesolver/
 │   ├── materials.py     PlaneStressMaterial
 │   ├── quadrature.py    Gauss rules in 1D and 2D
 │   ├── mesh.py          Mesh class and structured_quad8
 │   ├── assembly.py      global stiffness assembly, dense and CSR
 │   ├── sparse.py        CSR matrix, IC(0) factorisation and triangular solves
-│   ├── iterative.py     conjugate gradients with Jacobi and IC(0)
+│   ├── iterative.py     conjugate gradients with Jacobi and IC(0), Python or C++ kernels
 │   ├── solver.py        dense and sparse solution with prescribed displacements
 │   ├── loads.py         consistent edge tractions
 │   ├── errors.py        L2 and energy error norms
@@ -195,7 +242,7 @@ fe-solver/
 │       ├── base.py      abstract element base class
 │       ├── quad8.py     8-node serendipity quadrilateral
 │       └── cst.py       constant strain triangle
-└── tests/               142 tests
+└── tests/               165 tests
 ```
 
 Library code is kept in `fesolver/`, whereas problem-specific scripts are kept in `examples/`.
@@ -210,7 +257,8 @@ The full derivation is given in [docs/theory.md](docs/theory.md).
 
 - The analysis is 2D plane stress only: linear elastic, isotropic and small strain.
 - Only the Quad8 and CST elements are available, with one element type per mesh.
-- The sparse path is written in pure Python and is much slower than SciPy's compiled solvers (see the benchmark).
+- Only the matrix-vector product and the triangular solves have C++ versions. The CSR build, partitioning, IC(0) factorisation and transpose are pure Python, and the factorisation now takes most of the C++ IC(0) solve time. SciPy's compiled direct solver is still faster (see the benchmark).
+- Nothing runs in parallel: every kernel runs on a single core.
 - The sparse path does not check for rigid-body modes. An under-constrained model is not detected: CG does not converge and a warning is raised.
 - IC(0) can break down for some symmetric positive definite matrices. A breakdown is detected and reported, but no diagonal shift is applied.
 - The nodes are not reordered before the IC(0) factorisation.
