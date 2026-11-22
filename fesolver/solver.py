@@ -130,7 +130,7 @@ def sparse_solve(K,F,fixed_dofs,fixed_values = None, preconditioner = None, back
 
     """
     K_ff , F_rhs , free_dofs, prescribed = partition_csr(K,F,fixed_dofs, fixed_values)
-    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner, backend = "python")
+    u_f , history= cg(K = K_ff, b =  F_rhs ,preconditioner = preconditioner, backend = backend)
     for index,value in enumerate(free_dofs) : 
         prescribed[value] = u_f[index]
     u = prescribed
