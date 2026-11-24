@@ -62,7 +62,7 @@ The sparse path was compared against a dense direct solve (NumPy) and a sparse d
 
 **Iterations.** The number of CG iterations roughly doubles each time the grid is refined, for all three variants. IC(0) reduces the count by about nine times, but does not change how it grows. Jacobi saves between 5% and 12%, because the diagonal of the stiffness matrix is nearly constant on a uniform mesh.
 
-**Time.** Fewer iterations did not give a proportional saving in time. IC(0) needs about nine times fewer iterations than plain CG, but on the largest grid it is only about 1.6 times faster, because each iteration adds a forward and a backward triangular solve. SciPy's sparse direct solve is about 200 times faster than CG with IC(0) on the largest grid. Its loops run in compiled code, and a sparse direct solve is inexpensive for 2D problems of this size.
+**Time.** Fewer iterations did not give a proportional saving in time. IC(0) needs about nine times fewer iterations than plain CG, but on the largest grid it is only about 1.6 times faster, because each iteration adds a forward and a backward triangular solve. SciPy's sparse direct solve is about 215 times faster than CG with IC(0) on the largest grid. Its loops run in compiled code, and a sparse direct solve is inexpensive for 2D problems of this size.
 
 **Where the time goes.** Each stage of the IC(0) path was also timed on its own. On the largest grid, the triangular solves take 77% of the solve time, the matrix-vector products 17%, and building the preconditioner 5%. The timed stages add up to within 4% of the measured solve time on every grid. These loops are written in pure Python, so they were the first to be moved to compiled code.
 

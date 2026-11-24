@@ -36,8 +36,8 @@ def cg(K,b,preconditioner = None,x0 = None,tol = 1e-8,max_iter = None,backend = 
         Which kernels run the matrix-vector products and the IC(0)
         triangular solves: the pure-Python CSR methods or the compiled
         C++ versions in fesolver._kernels. Both do the same arithmetic,
-        so the iterations and history agree; only the run time differs.
-        Defaults to "python".
+        but floating-point sums can be ordered differently, so the iteration
+        count may differ by one; otherwise only the run time differs.
  
     Returns
     -------
